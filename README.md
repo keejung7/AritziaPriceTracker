@@ -30,18 +30,7 @@ node scraper.js
 
 - **Output:** `product_links.csv`
 
-### 2. Clean Links
-
-Removes duplicates and formats the links for the detail scraper.
-
-```bash
-node clean_links.js
-```
-
-- **Input:** `product_links.csv`
-- **Output:** `unique_products.csv`
-
-### 3. Scrape Details
+### 2. Scrape Details
 
 Visits each unique product page to extract colors, original prices, and sale prices.
 
@@ -52,7 +41,7 @@ node details_scraper.js
 - **Input:** `unique_products.csv`
 - **Output:** `product_details.jsonl`
 
-### 4. Generate View
+### 3. Generate View
 
 Creates a sortable HTML table to visualize the data.
 
