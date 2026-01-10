@@ -51,3 +51,4 @@ node generate_view.js
 
 - **Input:** `product_details.jsonl`
 - **Output:** `view.html` (Open this file in your browser)
+<img width="1900" height="697" alt="Screenshot 2026-01-09 at 4 34 49 PM" src="https://github.com/user-attachments/assets/b9ebb735-4b6b-4ca8-9ca1-ece6e95ce5f3" />
