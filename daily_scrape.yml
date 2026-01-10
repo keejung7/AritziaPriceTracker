@@ -1,0 +1,49 @@
+name: Daily Aritzia Scrape
+
+on:
+  workflow_dispatch: # Allows you to click a button to run it manually
+  schedule:
+    - cron: '0 13 * * *' # Runs every day at 13:00 UTC
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6 hours max execution time
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb
+        npm ci
+
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps chromium
+
+    - name: Run Scraper Pipeline
+      env:
+        CI: true
+      run: |
+        xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" node scraper.js
+        xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" node details_scraper.js
+        node generate_view.js
+
+    - name: Commit and Push results
+      run: |
+        git config --global user.name 'GitHub Actions Bot'
+        git config --global user.email 'actions@github.com'
+        git add product_links.csv product_details.jsonl view.html
+        git commit -m "Update scraped data $(date +'%Y-%m-%d')" || exit 0
+        git push
