@@ -95,11 +95,11 @@ function getColorCodeFromUrl(urlString) {
               .locator('div[data-design-system="indicator"]')
               .count()) > 0;
 
-          // don't click if total swatchCount is 1
-          if (swatchCount !== 1) {
+          // only click if current swatch is not already selected
+          if (!swatch.getAttribute("aria-pressed")) {
             await swatch.click({ force: true });
+            await page.waitForTimeout(2000); // Wait for URL and text to update
           }
-          await page.waitForTimeout(2000); // Wait for URL and text to update
 
           // Handle multiple color text elements.
           const colorTexts = await page
