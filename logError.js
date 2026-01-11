@@ -1,26 +1,36 @@
+const EventEmitter = require("events");
 const fs = require("fs");
 const path = require("path");
 
-let currentLogFile = path.join(__dirname, "scraper.log");
+class ScraperLogger extends EventEmitter {
+  constructor() {
+    super();
+    this.logFile = path.join(__dirname, "scraper.log");
 
-const setLogFile = (filePath) => {
-  currentLogFile = filePath;
-};
+    // The logger 'listens' to these events
+    this.on("info", this._logInfo);
+    this.on("error", this._logError);
+  }
 
-// ---------------------
-// Simple logger
-const log = (msg) => {
-  const timestamp = new Date().toISOString();
-  fs.appendFileSync(currentLogFile, `[${timestamp}] ${msg}\n`);
-  console.log(msg);
-};
-const logError = (msg, err) => {
-  const timestamp = new Date().toISOString();
-  fs.appendFileSync(
-    currentLogFile,
-    `[${timestamp}] ERROR: ${msg} ${err || ""}\n`
-  );
-  console.error(msg, err);
-};
+  setLogFile(filePath) {
+    this.logFile = filePath;
+  }
 
-module.exports = { log, logError, setLogFile };
+  _logInfo(msg) {
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(this.logFile, `[${timestamp}] INFO: ${msg}\n`);
+    console.log(msg);
+  }
+
+  _logError(msg, err) {
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(
+      this.logFile,
+      `[${timestamp}] ERROR: ${msg} ${err || ""}\n`
+    );
+    console.error(msg, err);
+  }
+}
+
+const logger = new ScraperLogger();
+module.exports = logger;
