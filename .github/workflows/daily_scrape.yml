@@ -44,6 +44,6 @@ jobs:
       run: |
         git config --global user.name 'GitHub Actions Bot'
         git config --global user.email 'actions@github.com'
-        git add product_links.csv product_details.jsonl view.html
+        git add -f product_links.csv product_details.jsonl view.html
         git commit -m "Update scraped data $(date +'%Y-%m-%d')" || exit 0
         git push

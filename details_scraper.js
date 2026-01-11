@@ -2,6 +2,9 @@ const { chromium } = require("playwright-extra");
 const stealth = require("puppeteer-extra-plugin-stealth");
 const fs = require("fs");
 const path = require("path");
+const logger = require("./logError"); // Use the single logger instance
+
+const NotAvailable = "N/A";
 
 // Apply stealth plugin to help avoid bot detection
 chromium.use(stealth());
@@ -9,8 +12,9 @@ chromium.use(stealth());
 // --- Configuration ---
 const inputCsvPath = path.join(__dirname, "product_links.csv");
 const outputJsonPath = path.join(__dirname, "product_details.jsonl");
-// ---------------------
+const logFile = path.join(__dirname, "details_scraper.log");
 
+logger.setLogFile(logFile); // Configure the logger
 /**
  * Extracts the 'color' query parameter from a URL string.
  * @param {string} urlString - The URL to parse.
@@ -21,7 +25,7 @@ function getColorCodeFromUrl(urlString) {
     const url = new URL(urlString);
     return url.searchParams.get("color");
   } catch (e) {
-    console.error(`Could not parse URL: ${urlString}`);
+    logger.emit("error", `Could not parse URL: ${urlString}`);
     return null;
   }
 }
@@ -39,12 +43,13 @@ function getColorCodeFromUrl(urlString) {
     // Deduplicate URLs
     urls = [...new Set(urls)];
   } catch (error) {
-    console.error(`Error reading input file: ${inputCsvPath}`);
-    console.error(error.message);
+    logger.emit("error", `Error reading input file: ${inputCsvPath}`);
+    logger.emit("error", error.message);
     return; // Exit if we can't read the links
   }
 
-  console.log(
+  logger.emit(
+    "info",
     `Found ${urls.length} unique product links to scrape for details.`
   );
 
@@ -54,13 +59,16 @@ function getColorCodeFromUrl(urlString) {
     args: ["--disable-blink-features=AutomationControlled"],
   });
 
-  // Concurrency limit
-  const CONCURRENCY = 5;
+  // GitHub Actions runners have limited resources (2 vCPU cores).
+  // Reducing concurrency prevents CPU overload and timeouts.
+  const CONCURRENCY = process.env.CI ? 2 : 5;
 
   // Worker function to scrape a single product
   const scrapeProduct = async (url) => {
     // Create a new context for each page to ensure isolation (cookies, etc.)
     const context = await browser.newContext();
+    // Set default timeout (60s for CI, 30s for local)
+    context.setDefaultTimeout(process.env.CI ? 60000 : 30000);
     const page = await context.newPage();
 
     // Block images, fonts, and media to speed up loading and reduce bandwidth usage
@@ -71,12 +79,12 @@ function getColorCodeFromUrl(urlString) {
     });
 
     try {
-      console.log(`\nScraping: ${url}`);
+      logger.emit("info", `\nScraping: ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
       // Wait for color swatches to ensure they are loaded
       await page.waitForSelector('[data-testid="color-swatches"] button', {
-        timeout: 10000,
+        timeout: process.env.CI ? 20000 : 10000,
       });
 
       const swatchLocator = page.locator(
@@ -122,26 +130,28 @@ function getColorCodeFromUrl(urlString) {
           const originalPriceText = await page
             .locator('[data-testid="product-list-price-text"]')
             .innerText()
-            .catch(() => "N/A");
+            .catch(() => NotAvailable);
 
-          let salePriceText = "N/A";
+          let salePriceText = NotAvailable;
 
           if (hasIndicator) {
-            const salePriceLocator = page.locator(
-              'p[data-testid="product-list-sale-text"]'
-            );
-            if (
-              (await salePriceLocator.count()) > 0 &&
-              (await salePriceLocator.isVisible())
-            ) {
-              salePriceText = await salePriceLocator.innerText();
+            const salePrice = page
+              .locator('p[data-testid="product-list-sale-text"]')
+              .first();
+
+            try {
+              salePriceText = (await salePrice.isVisible())
+                ? (await salePrice.innerText()).trim()
+                : null;
+            } catch {
+              salePriceText = NotAvailable;
             }
           }
 
           // Calculate Sale Percent
           let salePercent = null;
           const parsePrice = (str) => {
-            if (!str || str === "N/A") return null;
+            if (!str || str === NotAvailable) return null;
             const match = str.match(/[\d,.]+/);
             return match ? parseFloat(match[0].replace(/,/g, "")) : null;
           };
@@ -160,7 +170,8 @@ function getColorCodeFromUrl(urlString) {
               sale_price: salePriceText,
               sale_percent: salePercent,
             });
-            console.log(
+            logger.emit(
+              "info",
               `  - Found color: ${colorText} (${colorCode}) | Price: ${originalPriceText} | Sale: ${salePriceText}`
             );
           }
@@ -174,7 +185,7 @@ function getColorCodeFromUrl(urlString) {
       // Save progress after each product to prevent data loss
       fs.appendFileSync(outputJsonPath, JSON.stringify(productData) + "\n");
     } catch (error) {
-      console.error(`  -> Failed to scrape ${url}: ${error.message}`);
+      logger.emit("error", `  -> Failed to scrape ${url}: ${error.message}`);
     } finally {
       await page.close();
       await context.close();
@@ -198,7 +209,10 @@ function getColorCodeFromUrl(urlString) {
 
   await Promise.all(workers);
 
-  console.log(`\n✅ Scraping complete. All data saved to ${outputJsonPath}`);
+  logger.emit(
+    "info",
+    `\n✅ Scraping complete. All data saved to ${outputJsonPath}`
+  );
 
   await browser.close();
 })();

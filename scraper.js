@@ -1,6 +1,8 @@
 const { chromium } = require("playwright-extra");
 const stealth = require("puppeteer-extra-plugin-stealth");
 const fs = require("fs");
+const path = require("path");
+const { log, logError, setLogFile } = require("./logError");
 
 // Apply the stealth plugin to evade detection
 chromium.use(stealth());
@@ -14,6 +16,8 @@ chromium.use(stealth());
   const context = await browser.newContext();
   const page = await context.newPage();
 
+  setLogFile(path.join(__dirname, "scraper.log"));
+
   // Block images, fonts, and media to speed up loading
   await page.route("**/*", (route) => {
     const type = route.request().resourceType();
@@ -22,14 +26,14 @@ chromium.use(stealth());
   });
 
   try {
-    console.log("Navigating to Aritzia to find categories...");
+    log("Navigating to Aritzia to find categories...");
     await page.goto("https://www.aritzia.com/en/clothing", {
       waitUntil: "domcontentloaded",
       timeout: 60000, // Increased timeout for larger initial load
     });
 
     // Wait for the category elements to render to avoid getting 0 results
-    console.log("Waiting for categories to load...");
+    log("Waiting for categories to load...");
     await page.waitForSelector('a[data-testid="swiper-item"]');
 
     // Extract subcategory links
@@ -46,12 +50,12 @@ chromium.use(stealth());
     });
 
     const uniqueCategories = [...new Set(categoryLinks)];
-    console.log(`Found ${uniqueCategories.length} subcategories.`);
+    log(`Found ${uniqueCategories.length} subcategories.`);
 
     const allProductLinks = new Set();
 
     for (const categoryUrl of uniqueCategories) {
-      console.log(`Navigating to category: ${categoryUrl}`);
+      log(`Navigating to category: ${categoryUrl}`);
       try {
         // Append ?lastViewed=300 to try and load all items in this category at once
         const urlWithParams = categoryUrl.includes("?")
@@ -63,7 +67,7 @@ chromium.use(stealth());
           timeout: 60000,
         });
 
-        console.log("Initial load complete. Scrolling...");
+        log("Initial load complete. Scrolling...");
         await autoScroll(page);
 
         const productLinks = await page.evaluate(() => {
@@ -74,20 +78,20 @@ chromium.use(stealth());
         });
 
         productLinks.forEach((link) => allProductLinks.add(link));
-        console.log(`Total unique products so far: ${allProductLinks.size}`);
+        log(`Total unique products so far: ${allProductLinks.size}`);
       } catch (e) {
-        console.error(`Failed to scrape category ${categoryUrl}:`, e);
+        logError(`Failed to scrape category ${categoryUrl}:`, e);
       }
     }
 
     // Save links to CSV
     const uniqueLinks = [...allProductLinks];
-    console.log(`Found total ${uniqueLinks.length} unique products.`);
+    log(`Found total ${uniqueLinks.length} unique products.`);
     const csvContent = "URL\n" + uniqueLinks.join("\n");
     fs.writeFileSync("product_links.csv", csvContent);
-    console.log("Links saved to product_links.csv");
+    log("Links saved to product_links.csv");
   } catch (error) {
-    console.error("Error during scraping:", error);
+    logError("Error during scraping:", error);
   } finally {
     await browser.close();
   }
@@ -101,7 +105,7 @@ async function autoScroll(page) {
     return sup ? parseInt(sup.innerText.replace(/\D/g, ""), 10) : 0;
   });
 
-  console.log(`Target item count: ${targetCount}`);
+  log(`Target item count: ${targetCount}`);
 
   let previousCount = 0;
   let currentCount = await page.evaluate(() => {
@@ -114,7 +118,7 @@ async function autoScroll(page) {
 
   while (noChangeCount < 2) {
     if (targetCount > 0 && currentCount >= targetCount) {
-      console.log("Reached target item count.");
+      log("Reached target item count.");
       break;
     }
 
@@ -141,7 +145,7 @@ async function autoScroll(page) {
       return new Set(anchors.map((a) => a.href.split("?")[0])).size;
     });
 
-    console.log(`Scrolled... Products found: ${currentCount}`);
+    log(`Scrolled... Products found: ${currentCount}`);
 
     if (currentCount === previousCount) {
       noChangeCount++;
@@ -150,7 +154,7 @@ async function autoScroll(page) {
         .locator('button:has-text("Load More"), button:has-text("Show More")')
         .first();
       if (await loadMoreBtn.isVisible()) {
-        console.log("Clicking 'Load More' button...");
+        log("Clicking 'Load More' button...");
         await loadMoreBtn.click({ force: true });
         await page.waitForTimeout(3000);
         noChangeCount = 0; // Reset counter since we took action
