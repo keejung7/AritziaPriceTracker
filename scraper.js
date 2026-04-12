@@ -41,11 +41,11 @@ chromium.use(stealth());
       // Select elements and map to href in one step
       return Array.from(
         document.querySelectorAll('a[data-testid="swiper-item"]'),
-        (a) => a.href
+        (a) => a.href,
       ).filter(
         (href) =>
           href.includes("/en/clothing") &&
-          href !== "https://www.aritzia.com/en/clothing"
+          href !== "https://www.aritzia.com/en/clothing",
       );
     });
 
@@ -68,11 +68,11 @@ chromium.use(stealth());
         });
 
         logger.emit("info", "Initial load complete. Scrolling...");
-        await autoScroll(page);
+        await autoScroll(page, logger);
 
         const productLinks = await page.evaluate(() => {
           const anchors = Array.from(
-            document.querySelectorAll('a[href*="/en/product"]')
+            document.querySelectorAll('a[href*="/en/product"]'),
           );
           return anchors.map((a) => a.href.split("?")[0]);
         });
@@ -80,11 +80,7 @@ chromium.use(stealth());
         productLinks.forEach((link) => allProductLinks.add(link));
         logger.emit(
           "info",
-          `Total unique products so far: ${allProductLinks.size}`
-        );
-        logger.emit(
-          "info",
-          `Total unique products so far: ${allProductLinks.size}`
+          `Total unique products so far: ${allProductLinks.size}`,
         );
       } catch (e) {
         logger.emit("error", `Failed to scrape category ${categoryUrl}:`, e);
@@ -105,7 +101,7 @@ chromium.use(stealth());
 })();
 
 // Helper function to handle infinite scroll
-async function autoScroll(page) {
+async function autoScroll(page, logger, categoryUrl) {
   // Extract the total count from the <sup> sibling of the heading
   const targetCount = await page.evaluate(() => {
     const sup = document.querySelector('h1[data-testid="page-heading"] ~ sup');
@@ -117,7 +113,7 @@ async function autoScroll(page) {
   let previousCount = 0;
   let currentCount = await page.evaluate(() => {
     const anchors = Array.from(
-      document.querySelectorAll('a[href*="/en/product"]')
+      document.querySelectorAll('a[href*="/en/product"]'),
     );
     return new Set(anchors.map((a) => a.href.split("?")[0])).size;
   });
@@ -133,13 +129,11 @@ async function autoScroll(page) {
 
     // Scroll to bottom
     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)");
-    await page.waitForTimeout(2000);
 
     // Wait longer for new items to load (network can be slow with many items)
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(3000);
     // Scroll up a bit to trigger lazy loading or "load more" triggers
     await page.evaluate("window.scrollBy(0, -1000)");
-    await page.waitForTimeout(1000);
 
     // Scroll back to bottom
     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)");
@@ -147,7 +141,7 @@ async function autoScroll(page) {
 
     currentCount = await page.evaluate(() => {
       const anchors = Array.from(
-        document.querySelectorAll('a[href*="/en/product"]')
+        document.querySelectorAll('a[href*="/en/product"]'),
       );
       return new Set(anchors.map((a) => a.href.split("?")[0])).size;
     });
@@ -155,7 +149,6 @@ async function autoScroll(page) {
     logger.emit("info", `Scrolled... Products found: ${currentCount}`);
 
     if (currentCount === previousCount) {
-      noChangeCount++;
       // Try to find and click a "Load More" button if scrolling didn't help
       const loadMoreBtn = page
         .locator('button:has-text("Load More"), button:has-text("Show More")')
@@ -172,4 +165,7 @@ async function autoScroll(page) {
       noChangeCount = 0;
     }
   }
+
+  if (currentCount > 300)
+    logger.emit("warn", `Category exceeds lastViewed=300 cap: ${categoryUrl}`);
 }

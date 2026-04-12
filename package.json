@@ -5,5 +5,11 @@
     "playwright": "^1.40.0",
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "scripts": {
+    "start": "node run_pipeline.js"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0"
   }
 }
