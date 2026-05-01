@@ -90,6 +90,29 @@ function getColorCodeFromUrl(urlString) {
 
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
+        // Get Product Brand and Name
+        const brand = await page
+          .getByTestId("product-brand-text")
+          .innerText()
+          .catch((error) => {
+            logger.emit(
+              "error",
+              `Error reading product brand for ${url}`,
+              error.message,
+            );
+          });
+
+        const name = await page
+          .getByTestId("product-name-text")
+          .innerText()
+          .catch((error) => {
+            logger.emit(
+              "error",
+              `Error reading product name for ${url}`,
+              error.message,
+            );
+          });
+
         // Wait for color swatches to ensure they are loaded
         await page.waitForSelector('[data-testid="color-swatches"] button', {
           timeout: process.env.CI ? 20000 : 15000,
@@ -213,6 +236,8 @@ function getColorCodeFromUrl(urlString) {
 
         const productData = {
           product_link: url,
+          product_name: name,
+          product_brand: brand,
           colors: Array.from(colorMap, ([key, value]) => ({ [key]: value })),
         };
 
