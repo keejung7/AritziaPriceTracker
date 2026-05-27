@@ -91,7 +91,12 @@ chromium.use(stealth());
     const uniqueLinks = [...allProductLinks];
     logger.emit("info", `Found total ${uniqueLinks.length} unique products.`);
     const csvContent = "URL\n" + uniqueLinks.join("\n");
-    fs.writeFileSync("product_links.csv", csvContent);
+    const outputCsvPath =
+      process.env.PRODUCT_LINKS_PATH ||
+      path.join(__dirname, "product_links.csv");
+    fs.mkdirSync(path.dirname(outputCsvPath), { recursive: true });
+    fs.writeFileSync(outputCsvPath, csvContent);
+    logger.emit("info", `Links saved to ${outputCsvPath}`);
     logger.emit("info", "Links saved to product_links.csv");
   } catch (error) {
     logger.emit("error", "Error during scraping:", error);

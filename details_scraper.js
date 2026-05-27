@@ -8,10 +8,17 @@ const NotAvailable = "N/A";
 
 // Apply stealth plugin to help avoid bot detection
 chromium.use(stealth());
-
 // --- Configuration ---
-const inputCsvPath = path.join(__dirname, "product_links.csv");
-const outputJsonPath = path.join(__dirname, "product_details.jsonl");
+const inputCsvPath =
+  process.env.PRODUCT_LINKS_PATH || path.join(__dirname, "product_links.csv");
+
+const outputJsonPath =
+  process.env.PRODUCT_DETAILS_PATH ||
+  path.join(__dirname, "product_details.jsonl");
+
+fs.mkdirSync(path.dirname(outputJsonPath), { recursive: true });
+
+const logFile = path.join(__dirname, "details_scraper.log");
 const logFile = path.join(__dirname, "details_scraper.log");
 
 logger.setLogFile(logFile); // Configure the logger
