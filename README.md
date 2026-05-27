@@ -8,6 +8,8 @@ Data collection will be performed daily, ensuring changes in price, removal/addi
 
 - Node.js installed on your machine.
 - `npm` (Node Package Manager).
+- PostgreSQL, either local or hosted with a provider such as Neon.
+- `psql` for running schema setup and migrations from the command line.
 
 ## Installation
 
@@ -15,6 +17,46 @@ Data collection will be performed daily, ensuring changes in price, removal/addi
     ```bash
     npm install
     ```
+
+## Database Setup
+
+This project stores product, price, and stock history in PostgreSQL. The schema is defined in:
+
+```bash
+db/schema.sql
+```
+
+The Node scripts load database settings from `.env` using `dotenv`.
+
+For a hosted PostgreSQL database such as Neon, add a connection string:
+
+```bash
+DATABASE_URL="postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require"
+```
+
+For local PostgreSQL, the scripts fall back to:
+
+```bash
+POSTGRES_USER="your_local_user"
+POSTGRES_USER_PASSWORD="your_local_password"
+```
+
+with the local database name `aritzia_db`.
+
+To create the schema and tables in a fresh database, run `db/schema.sql` directly with `psql`:
+
+```bash
+psql "postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require" -f db/schema.sql
+```
+
+If you want to use `DATABASE_URL` with `psql`, export it in your shell first:
+
+```bash
+export DATABASE_URL="postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require"
+psql "$DATABASE_URL" -f db/schema.sql
+```
+
+Note: `.env` is loaded by the Node scripts, but `psql` does not automatically read `.env`.
 
 ## Usage Sequence
 
@@ -38,10 +80,21 @@ Visits each unique product page to extract colors, original prices, and sale pri
 node details_scraper.js
 ```
 
-- **Input:** `unique_products.csv`
+- **Input:** `product_links.csv`
 - **Output:** `product_details.jsonl`
 
-### 3. Generate View
+### 3. Save to PostgreSQL
+
+Parses `product_details.jsonl` and upserts product metadata, colors, price snapshots, and stock snapshots into PostgreSQL.
+
+```bash
+node db/db.js
+```
+
+- **Input:** `product_details.jsonl`
+- **Output:** rows inserted into PostgreSQL
+
+### 4. Generate View
 
 Creates a sortable HTML table to visualize the data.
 
@@ -52,3 +105,9 @@ node generate_view.js
 - **Input:** `product_details.jsonl`
 - **Output:** `view.html` (Open this file in your browser)
 <img width="1900" height="697" alt="Screenshot 2026-01-09 at 4 34 49 PM" src="https://github.com/user-attachments/assets/b9ebb735-4b6b-4ca8-9ca1-ece6e95ce5f3" />
+
+You can also run the full pipeline:
+
+```bash
+npm start
+```

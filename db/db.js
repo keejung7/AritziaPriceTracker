@@ -4,14 +4,21 @@ const { Pool } = pg;
 
 const parser = require("./parser.js");
 
-const pool = new Pool({
-  host: "localhost",
-  port: 5432,
-  database: "aritzia_db",
-  user: process.env.POSTGRES_USER,
-  password: process.env.POSTGRES_USER_PASSWORD,
-  options: "-c search_path=aritzia_products,public",
-});
+const pool = new Pool(
+  process.env.DATABASE_URL
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        options: "-c search_path=aritzia_products,public",
+      }
+    : {
+        host: "localhost",
+        port: 5432,
+        database: "aritzia_db",
+        user: process.env.POSTGRES_USER,
+        password: process.env.POSTGRES_USER_PASSWORD,
+        options: "-c search_path=aritzia_products,public",
+      },
+);
 
 // For each product, insert product information
 async function main() {
