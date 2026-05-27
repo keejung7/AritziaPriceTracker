@@ -213,6 +213,9 @@ function getColorCodeFromUrl(urlString) {
 
         const productData = {
           product_link: url,
+          product_name: name,
+          product_brand: brand,
+          scraped_at: new Date().toISOString(),
           colors: Array.from(colorMap, ([key, value]) => ({ [key]: value })),
         };
 
@@ -228,6 +231,7 @@ function getColorCodeFromUrl(urlString) {
           );
           const productData = {
             product_link: url,
+            scraped_at: new Date().toISOString(),
             colors: [],
           };
           outputStream.write(JSON.stringify(productData) + "\n");

@@ -26,7 +26,7 @@ CREATE TABLE price_snapshots (
     original_price numeric,
     sale_price numeric,
     sale_percent numeric,
-    scraped_date timestamp NOT NULL,
+    scraped_date timestamptz NOT NULL,
     PRIMARY KEY (color_id, product_no, scraped_date),
     FOREIGN KEY (color_id, product_no)
       REFERENCES product_colors (color_id, product_no)
@@ -37,7 +37,7 @@ CREATE TABLE stock_snapshots (
     color_id text NOT NULL,
     product_no bigint NOT NULL,
     product_status text,
-    scraped_date timestamp NOT NULL,
+    scraped_date timestamptz NOT NULL,
     PRIMARY KEY (product_size, color_id, product_no, scraped_date),
     FOREIGN KEY (color_id, product_no)
       REFERENCES product_colors (color_id, product_no)
