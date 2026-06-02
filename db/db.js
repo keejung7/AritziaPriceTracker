@@ -8,7 +8,6 @@ const pool = new Pool(
   process.env.DATABASE_URL
     ? {
         connectionString: process.env.DATABASE_URL,
-        options: "-c search_path=aritzia_products,public",
       }
     : {
         host: "localhost",
@@ -76,7 +75,7 @@ async function saveParsedProduct(pool, product) {
 
 async function insertOrUpdateProductTable(client, product) {
   const sql = `
-INSERT INTO products (
+INSERT INTO aritzia_products.products (
   product_no, 
   product_slug, 
   product_full_url, 
@@ -111,7 +110,7 @@ color_name
 
 async function insertColorsTable(client, color) {
   const sql = `
-   INSERT INTO colors (
+   INSERT INTO aritzia_products.colors (
     color_id,
     color_name
    )
@@ -134,7 +133,7 @@ product_no
 
 async function insertProductColorsTable(client, productColor) {
   const sql = `
-    INSERT INTO product_colors (
+    INSERT INTO aritzia_products.product_colors (
      color_id,
      product_no
     )
@@ -159,7 +158,7 @@ scraped_date,
 */
 
 async function insertPriceSnapshotsTable(client, priceSnapshot) {
-  const sql = `INSERT INTO price_snapshots (
+  const sql = `INSERT INTO aritzia_products.price_snapshots (
     color_id,
     product_no,
     original_price,
@@ -195,7 +194,7 @@ scraped_date,
 */
 
 async function insertStockSnapshotsTable(client, sizeSnapshot) {
-  const sql = `INSERT INTO stock_snapshots (
+  const sql = `INSERT INTO aritzia_products.stock_snapshots (
     product_size,
     color_id,
     product_no,

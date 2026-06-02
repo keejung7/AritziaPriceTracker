@@ -19,7 +19,6 @@ const outputJsonPath =
 fs.mkdirSync(path.dirname(outputJsonPath), { recursive: true });
 
 const logFile = path.join(__dirname, "details_scraper.log");
-const logFile = path.join(__dirname, "details_scraper.log");
 
 logger.setLogFile(logFile); // Configure the logger
 
@@ -101,6 +100,10 @@ function getColorCodeFromUrl(urlString) {
         await page.waitForSelector('[data-testid="color-swatches"] button', {
           timeout: process.env.CI ? 20000 : 15000,
         });
+
+        // get product name and brand
+        const name = await page.locator('[data-testid="product-name-text"]').innerText().catch(() => null)
+        const brand = await page.locator('[data-testid="product-brand-text"]').innerText().catch(() => null);
 
         const swatchLocator = page.locator(
           '[data-testid="color-swatches"] button',
