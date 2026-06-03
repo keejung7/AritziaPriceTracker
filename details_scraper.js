@@ -5,6 +5,12 @@ const path = require("path");
 const logger = require("./logError"); // Use the single logger instance
 
 const NotAvailable = "N/A";
+const DEFAULT_TIMEOUT_MS = process.env.CI ? 60000 : 30000;
+const NAV_TIMEOUT_MS = 60000;
+const PDP_READY_TIMEOUT_MS = process.env.CI ? 20000 : 15000;
+const VARIANT_URL_TIMEOUT_MS = 5000;
+const SIZE_OPTIONS_TIMEOUT_MS = 5000;
+const RETRY_DELAY_MS = 2000;
 
 // Apply stealth plugin to help avoid bot detection
 chromium.use(stealth());
@@ -21,6 +27,10 @@ fs.mkdirSync(path.dirname(outputJsonPath), { recursive: true });
 const logFile = path.join(__dirname, "details_scraper.log");
 
 logger.setLogFile(logFile); // Configure the logger
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Extracts the 'color' query parameter from a URL string.
@@ -84,7 +94,7 @@ function getColorCodeFromUrl(urlString) {
         // Create a new context for each page to ensure isolation (cookies, etc.)
         context = await browser.newContext();
         // Set default timeout (60s for CI, 30s for local)
-        context.setDefaultTimeout(process.env.CI ? 60000 : 30000);
+        context.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
         page = await context.newPage();
 
         // Block fonts and media to speed up loading, but allow images
@@ -94,20 +104,29 @@ function getColorCodeFromUrl(urlString) {
           else route.continue();
         });
 
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-
-        // Wait for color swatches to ensure they are loaded
-        await page.waitForSelector('[data-testid="color-swatches"] button', {
-          timeout: process.env.CI ? 20000 : 15000,
+        await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: NAV_TIMEOUT_MS,
         });
 
-        // get product name and brand
-        const name = await page.locator('[data-testid="product-name-text"]').innerText().catch(() => null)
-        const brand = await page.locator('[data-testid="product-brand-text"]').innerText().catch(() => null);
-
+        // Wait for color swatches to ensure they are loaded
         const swatchLocator = page.locator(
           '[data-testid="color-swatches"] button',
         );
+        await swatchLocator.first().waitFor({
+          state: "visible",
+          timeout: PDP_READY_TIMEOUT_MS,
+        });
+
+        // get product name and brand
+        const name = await page
+          .locator('[data-testid="product-name-text"]')
+          .innerText()
+          .catch(() => null);
+        const brand = await page
+          .locator('[data-testid="product-brand-text"]')
+          .innerText()
+          .catch(() => null);
         const swatchCount = await swatchLocator.count();
 
         const colorMap = new Map();
@@ -126,7 +145,7 @@ function getColorCodeFromUrl(urlString) {
             if (isPressed !== "true") {
               await Promise.all([
                 page.waitForURL((url) => url.searchParams.has("color"), {
-                  timeout: 5000,
+                  timeout: VARIANT_URL_TIMEOUT_MS,
                 }),
                 swatch.click({ force: true }),
               ]);
@@ -186,10 +205,13 @@ function getColorCodeFromUrl(urlString) {
             let sizes = [];
             if (hasSizeDropdown) {
               await sizeDropdown.click();
-              await page.waitForSelector(
+              const sizeOptions = page.locator(
                 'ul[role="listbox"] li[role="option"]',
-                { timeout: 5000 },
               );
+              await sizeOptions.first().waitFor({
+                state: "visible",
+                timeout: SIZE_OPTIONS_TIMEOUT_MS,
+              });
               sizes = await page.evaluate(() => {
                 return Array.from(
                   document.querySelectorAll(
@@ -251,7 +273,7 @@ function getColorCodeFromUrl(urlString) {
         if (context) await context.close().catch(() => {});
       }
       // Optional: wait a bit before retrying
-      if (attempt < maxRetries) await new Promise((r) => setTimeout(r, 2000));
+      if (attempt < maxRetries) await delay(RETRY_DELAY_MS);
     }
   };
 
