@@ -4,6 +4,12 @@ This project scrapes product data from the Aritzia website using Playwright. It 
 
 Data collection will be performed daily, ensuring changes in price, removal/addition of items will be tracked.
 
+The project also includes a Next.js app with API routes for reading price history from PostgreSQL.
+
+## System Design
+
+![System design](system_design_simple.png)
+
 ## Prerequisites
 
 - Node.js installed on your machine.
@@ -109,5 +115,21 @@ node generate_view.js
 You can also run the full pipeline:
 
 ```bash
-npm start
+npm run pipeline
+```
+
+## Next.js App
+
+Start the local Next.js development server:
+
+```bash
+npm run dev
+```
+
+The app exposes price history API routes:
+
+```bash
+GET /api/products/:productNo/price-history
+GET /api/products/:productNo/prices/:date
+GET /api/prices/latest
 ```
