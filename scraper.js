@@ -101,7 +101,11 @@ chromium.use(stealth());
   } catch (error) {
     logger.emit("error", "Error during scraping:", error);
   } finally {
-    await browser.close();
+    logger.emit("info", "Closing browser...");
+    await page.close().catch(() => {});
+    await context.close().catch(() => {});
+    await browser.close().catch(() => {});
+    logger.emit("info", "Browser closed.");
   }
 })();
 

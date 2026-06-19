@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { formatProductPriceForDate } from "../../../../../services/priceHistoryService";
 
 const { getProductPriceForDate } = require("../../../../../../db/queries");
 
@@ -28,5 +29,7 @@ export async function GET(
     date,
   });
 
-  return NextResponse.json(rows);
+  const formattedRows = formatProductPriceForDate(rows);
+
+  return NextResponse.json(formattedRows);
 }

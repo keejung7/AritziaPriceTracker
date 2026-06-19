@@ -1,6 +1,8 @@
 const { execFileSync } = require("child_process");
 const path = require("path");
 
+const STEP_TIMEOUT_MS = 60 * 60 * 1000;
+
 const run = (script, env = {}) => {
   console.log(`\n[Pipeline] Starting ${script}...`);
 
@@ -9,11 +11,17 @@ const run = (script, env = {}) => {
       stdio: "inherit",
       cwd: __dirname,
       env: { ...process.env, ...env },
+      timeout: STEP_TIMEOUT_MS,
     });
 
     console.log(`[Pipeline] Completed ${script}.`);
   } catch (error) {
     console.error(`[Pipeline] Failed to run ${script}.`);
+    if (error.signal === "SIGTERM") {
+      console.error(
+        `[Pipeline] ${script} exceeded ${STEP_TIMEOUT_MS / 60000} minutes.`,
+      );
+    }
     process.exit(1);
   }
 };
@@ -40,4 +48,3 @@ const runEnv = {
 run("scraper.js", runEnv);
 run("details_scraper.js", runEnv);
 run("db/db.js", runEnv);
-run("generate_view.js", runEnv);

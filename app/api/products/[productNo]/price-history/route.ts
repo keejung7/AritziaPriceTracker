@@ -1,6 +1,7 @@
 // URL: /api/products/:productNo/price-history
 
 import { NextRequest, NextResponse } from "next/server";
+import { formatProductPriceHistory } from "../../../../services/priceHistoryService";
 
 const { getProductPriceHistory } = require("../../../../../db/queries");
 
@@ -27,5 +28,7 @@ export async function GET(
     dateTo: searchParams.get("dateTo"),
   });
 
-  return NextResponse.json(rows);
+  const formattedRows = formatProductPriceHistory(rows);
+
+  return NextResponse.json(formattedRows);
 }
