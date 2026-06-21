@@ -1,0 +1,20 @@
+html {
+  color-scheme: light;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background:
+    linear-gradient(180deg, rgba(240, 234, 227, 0.82), rgba(250, 249, 247, 0.94) 240px),
+    #faf9f7;
+  color: #171513;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+}
