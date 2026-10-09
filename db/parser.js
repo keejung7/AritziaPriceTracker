@@ -1,7 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 
-const filePath = path.join(__dirname, "..", "product_details.jsonl");
+const filePath =
+  process.env.PRODUCT_DETAILS_PATH ||
+  process.argv[2] ||
+  path.join(__dirname, "..", "product_details.jsonl");
 
 const fileContent = fs.readFileSync(filePath, "utf8");
 
@@ -14,16 +17,29 @@ const fileContent = fs.readFileSync(filePath, "utf8");
     product_name,
     product_brand,
   },
+  categories: [
+    {
+      category_slug,
+    }
+  ],
+  productCategories: [
+    {
+      product_no,
+      category_slug,
+    }
+  ],
   colors: [
     {
       color_id,
       color_name,
+      swatch_image_url,
     }
   ],
   productColors: [
     {
       product_no,
       color_id,
+      product_color_image_url,
     }
   ],
   priceSnapshots: [
@@ -75,10 +91,21 @@ function getProductDataForInsert() {
         product_brand: productBrand,
       },
       colors: [], // GATHER ARRAY
+      categories: [], // GATHER ARRAY
+      productCategories: [], // GATHER ARRAY
       productColors: [], // GATHER ARRAY
       priceSnapshots: [], // GATHER ARRAY
       stockSnapshots: [], // GATHER ARRAY
     };
+
+    const sourceCategories = getSourceCategories(product.source_categories);
+    for (const categorySlug of sourceCategories) {
+      productObj.categories.push({ category_slug: categorySlug });
+      productObj.productCategories.push({
+        product_no: productNo,
+        category_slug: categorySlug,
+      });
+    }
 
     const scrapedDate = product.scraped_at
       ? new Date(product.scraped_at)
@@ -91,14 +118,22 @@ function getProductDataForInsert() {
       const colorId = Object.keys(colorObj)[0];
       const colorDetails = colorObj[colorId];
       const colorName = colorDetails.color_text;
+      const swatchImageUrl = colorDetails.swatch_image_url || null;
+      const productColorImageUrl =
+        colorDetails.product_color_image_url || null;
 
       // ADD COLORS DATA
-      productObj.colors.push({ color_id: colorId, color_name: colorName });
+      productObj.colors.push({
+        color_id: colorId,
+        color_name: colorName,
+        swatch_image_url: swatchImageUrl,
+      });
 
       // ADD PRODUCT_COLORS DATA
       productObj.productColors.push({
         product_no: productNo,
         color_id: colorId,
+        product_color_image_url: productColorImageUrl,
       });
 
       // price data
@@ -161,6 +196,20 @@ function parsePrice(price) {
   const parsed = price.replace("$", "").trim();
 
   return Number(parsed);
+}
+
+function getSourceCategories(sourceCategories) {
+  if (!Array.isArray(sourceCategories)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      sourceCategories
+        .map((category) => String(category).trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 module.exports = { getProductDataForInsert };

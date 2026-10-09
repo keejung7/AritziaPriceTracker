@@ -9,7 +9,9 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
   "scripts": {
-    "start": "node run_pipeline.js"
+    "start": "node run_pipeline.js",
+    "test": "jest --runInBand --watchman=false",
+    "pipeline": "node run_pipeline.js"
   },
   "devDependencies": {
     "jest": "^30.2.0"

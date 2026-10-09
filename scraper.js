@@ -4,13 +4,16 @@ const fs = require("fs");
 const path = require("path");
 const logger = require("./logError");
 
+const BROWSER_CLOSE_TIMEOUT_MS = 15000;
+const HEADLESS = process.env.HEADLESS !== "false";
+
 // Apply the stealth plugin to evade detection
 chromium.use(stealth());
 
 (async () => {
   // Launch browser (headless: false allows you to see the process)
   const browser = await chromium.launch({
-    headless: false,
+    headless: HEADLESS,
     args: ["--disable-blink-features=AutomationControlled"],
   });
   const context = await browser.newContext();
@@ -52,11 +55,12 @@ chromium.use(stealth());
     const uniqueCategories = [...new Set(categoryLinks)];
     logger.emit("info", `Found ${uniqueCategories.length} subcategories.`);
 
-    const allProductLinks = new Set();
+    const productCategoriesByUrl = new Map();
 
     for (const categoryUrl of uniqueCategories) {
       logger.emit("info", `Navigating to category: ${categoryUrl}`);
       try {
+        const category = getCategorySlug(categoryUrl);
         // Append ?lastViewed=300 to try and load all items in this category at once
         const urlWithParams = categoryUrl.includes("?")
           ? `${categoryUrl}&lastViewed=300`
@@ -68,7 +72,7 @@ chromium.use(stealth());
         });
 
         logger.emit("info", "Initial load complete. Scrolling...");
-        await autoScroll(page, logger);
+        await autoScroll(page, logger, categoryUrl);
 
         const productLinks = await page.evaluate(() => {
           const anchors = Array.from(
@@ -77,10 +81,16 @@ chromium.use(stealth());
           return anchors.map((a) => a.href.split("?")[0]);
         });
 
-        productLinks.forEach((link) => allProductLinks.add(link));
+        productLinks.forEach((link) => {
+          if (!productCategoriesByUrl.has(link)) {
+            productCategoriesByUrl.set(link, new Set());
+          }
+
+          productCategoriesByUrl.get(link).add(category);
+        });
         logger.emit(
           "info",
-          `Total unique products so far: ${allProductLinks.size}`,
+          `Total unique products so far: ${productCategoriesByUrl.size}`,
         );
       } catch (e) {
         logger.emit("error", `Failed to scrape category ${categoryUrl}:`, e);
@@ -88,17 +98,75 @@ chromium.use(stealth());
     }
 
     // Save links to CSV
-    const uniqueLinks = [...allProductLinks];
-    logger.emit("info", `Found total ${uniqueLinks.length} unique products.`);
-    const csvContent = "URL\n" + uniqueLinks.join("\n");
-    fs.writeFileSync("product_links.csv", csvContent);
+    const productRows = [...productCategoriesByUrl].map(([url, categories]) => ({
+      url,
+      categories: [...categories],
+    }));
+    logger.emit("info", `Found total ${productRows.length} unique products.`);
+    const csvContent = [
+      "URL,Categories",
+      ...productRows.map(({ url, categories }) =>
+        [url, categories.join("|")].map(toCsvCell).join(","),
+      ),
+    ].join("\n");
+    const outputCsvPath =
+      process.env.PRODUCT_LINKS_PATH ||
+      path.join(__dirname, "product_links.csv");
+    fs.mkdirSync(path.dirname(outputCsvPath), { recursive: true });
+    fs.writeFileSync(outputCsvPath, csvContent);
+    logger.emit("info", `Links saved to ${outputCsvPath}`);
     logger.emit("info", "Links saved to product_links.csv");
   } catch (error) {
     logger.emit("error", "Error during scraping:", error);
   } finally {
-    await browser.close();
+    logger.emit("info", "Closing browser...");
+    const browserClosed = await closeBrowserWithTimeout(browser);
+    if (browserClosed) {
+      logger.emit("info", "Browser closed.");
+    } else {
+      logger.emit(
+        "warn",
+        `Browser close timed out after ${BROWSER_CLOSE_TIMEOUT_MS}ms; exiting after outputs were saved.`,
+      );
+      process.exit(0);
+    }
   }
 })();
+
+async function closeBrowserWithTimeout(browser) {
+  let timeout;
+  const closed = await Promise.race([
+    browser.close().then(() => true).catch(() => true),
+    new Promise((resolve) => {
+      timeout = setTimeout(() => resolve(false), BROWSER_CLOSE_TIMEOUT_MS);
+    }),
+  ]);
+
+  clearTimeout(timeout);
+  return closed;
+}
+
+function getCategorySlug(categoryUrl) {
+  const url = new URL(categoryUrl);
+  const pathParts = url.pathname.split("/").filter(Boolean);
+  const clothingIndex = pathParts.indexOf("clothing");
+
+  if (clothingIndex === -1 || clothingIndex === pathParts.length - 1) {
+    return pathParts[pathParts.length - 1] || "unknown";
+  }
+
+  return pathParts[clothingIndex + 1];
+}
+
+function toCsvCell(value) {
+  const text = String(value);
+
+  if (!/[",\n]/.test(text)) {
+    return text;
+  }
+
+  return `"${text.replace(/"/g, '""')}"`;
+}
 
 // Helper function to handle infinite scroll
 async function autoScroll(page, logger, categoryUrl) {
