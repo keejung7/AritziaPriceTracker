@@ -3,14 +3,18 @@ const stealth = require("puppeteer-extra-plugin-stealth");
 const fs = require("fs");
 const path = require("path");
 const logger = require("./logError"); // Use the single logger instance
+const {
+  SIZE_DROPDOWN_SELECTOR,
+  extractSizesFromDropdown,
+} = require("./sizeDropdown");
 
 const NotAvailable = "N/A";
 const DEFAULT_TIMEOUT_MS = process.env.CI ? 60000 : 30000;
 const NAV_TIMEOUT_MS = 60000;
 const PDP_READY_TIMEOUT_MS = process.env.CI ? 20000 : 15000;
 const VARIANT_URL_TIMEOUT_MS = 5000;
-// Keep the size lookup opportunistic so missing dropdowns do not dominate runtime.
-const SIZE_OPTIONS_TIMEOUT_MS = 250;
+const SIZE_UI_TIMEOUT_MS = 2000;
+const SIZE_OPTIONS_TIMEOUT_MS = 2000;
 const RETRY_DELAY_MS = 2000;
 const BROWSER_CLOSE_TIMEOUT_MS = 15000;
 const HEADLESS = process.env.HEADLESS !== "false";
@@ -406,37 +410,17 @@ function getCloudinarySizedImageUrl(url, width, height) {
             }
 
             // Extract sizing and stock availability
-            const sizeDropdown = page.locator(
-              '[data-testid="pdp-size-dropdown"] button#pdp-size-dropdown',
-            );
+            const sizeDropdown = page
+              .locator(SIZE_DROPDOWN_SELECTOR)
+              .filter({ visible: true });
             const hasSizeDropdown = (await sizeDropdown.count()) > 0;
 
             let sizes = [];
             if (hasSizeDropdown) {
               try {
-                await sizeDropdown.click({ force: true });
-                const sizeOptions = page.locator(
-                  'ul[role="listbox"] li[role="option"]',
-                );
-                await sizeOptions.first().waitFor({
-                  state: "attached",
-                  timeout: SIZE_OPTIONS_TIMEOUT_MS,
-                });
-                sizes = await page.evaluate(() => {
-                  return Array.from(
-                    document.querySelectorAll(
-                      'ul[role="listbox"] li[role="option"]',
-                    ),
-                  ).map((li) => {
-                    const size = li.querySelector("label")?.innerText.trim();
-                    const statusEl = li.querySelector(
-                      'p[data-design-system="text"]',
-                    );
-                    return {
-                      size,
-                      status: statusEl ? statusEl.innerText.trim() : "In Stock",
-                    };
-                  });
+                sizes = await extractSizesFromDropdown(page, {
+                  uiTimeoutMs: SIZE_UI_TIMEOUT_MS,
+                  optionTimeoutMs: SIZE_OPTIONS_TIMEOUT_MS,
                 });
               } catch (sizeError) {
                 logger.emit(
