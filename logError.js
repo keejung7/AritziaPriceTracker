@@ -10,6 +10,7 @@ class ScraperLogger extends EventEmitter {
 
     // The logger 'listens' to these events
     this.on("info", this._logInfo);
+    this.on("warn", this._logWarn);
     this.on("error", this._logError);
   }
 
@@ -26,6 +27,13 @@ class ScraperLogger extends EventEmitter {
     const logMessage = `[${timestamp}] INFO: ${msg}\n`;
     this.stream.write(logMessage);
     console.log(msg);
+  }
+
+  _logWarn(msg) {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] WARN: ${msg}\n`;
+    this.stream.write(logMessage);
+    console.warn(msg);
   }
 
   _logError(msg, err) {
