@@ -131,5 +131,12 @@ The app exposes price history API routes:
 ```bash
 GET /api/products/:productNo/price-history
 GET /api/products/:productNo/prices/:date
-GET /api/prices/latest
 ```
+
+`/api/prices/latest` has been removed; use `/api/catalog/products` for the product catalog.
+Migration `010_remove_product_scores.sql` retires derived scoring, stock metrics,
+and the unused latest-price table. Product history and date responses retain factual
+prices and size availability without computed scores. Apply migration 009 before 010
+on existing databases. Migration 010 is transactional and forward-only; take a database
+backup first if retired derived data must be retained. Raw price/stock observations and
+catalog snapshots are preserved.

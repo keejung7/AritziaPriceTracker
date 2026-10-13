@@ -110,10 +110,6 @@ export function formatProductPriceHistory(
   return product;
 }
 
-export function formatLatestPrices(rows: RawPriceHistoryRow[]): PriceRow[] {
-  return rows.map(formatPriceRow);
-}
-
 export function formatProductPriceForDate(
   rows: RawPriceHistoryRow[],
 ): PriceRow[] {

@@ -13,7 +13,6 @@ import {
   Group,
   MultiSelect,
   Paper,
-  Progress,
   ScrollArea,
   SegmentedControl,
   SimpleGrid,
@@ -47,7 +46,6 @@ const colors = [
     low: "$98",
     high: "$148",
     points: 18,
-    score: 66,
   },
   {
     key: "birch",
@@ -57,7 +55,6 @@ const colors = [
     low: "$88",
     high: "$148",
     points: 21,
-    score: 82,
   },
   {
     key: "claret",
@@ -67,7 +64,6 @@ const colors = [
     low: "$108",
     high: "$148",
     points: 14,
-    score: 74,
   },
   {
     key: "sage",
@@ -77,7 +73,6 @@ const colors = [
     low: "$128",
     high: "$148",
     points: 12,
-    score: 38,
   },
 ];
 
@@ -389,15 +384,6 @@ function ColorIntelligence() {
                         </Group>
                         <Text fw={850}>{color.current}</Text>
                       </Group>
-                      <Group justify="space-between" mt="sm" mb={6}>
-                        <Text size="xs" c="dimmed" fw={800} tt="uppercase">
-                          Sale quality
-                        </Text>
-                        <Text size="xs" fw={700}>
-                          {color.score}%
-                        </Text>
-                      </Group>
-                      <Progress value={color.score} color="red" size="sm" />
                     </Paper>
                   ))}
                 </Stack>

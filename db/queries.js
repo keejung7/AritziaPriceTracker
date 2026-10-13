@@ -73,11 +73,6 @@ async function main() {
     });
     console.log(priceForDateResult);
 
-    const latestProductPriceHistory = await getLatestPrices({
-      limit: 100,
-      saleOnly: true,
-    });
-    console.log(latestProductPriceHistory);
   } catch (error) {
     throw error;
   } finally {
@@ -194,40 +189,8 @@ async function getProductPriceForDate({ productNo, date }) {
   return result.rows;
 }
 
-// 2. get the latest price history data for all products
-// figure out how to get the latest price for each product
-
-async function getLatestPrices({ limit = 100, saleOnly = false } = {}) {
-  const sql = `
-    SELECT 
-      DISTINCT ON (p.product_no, c.color_id)
-        p.product_no,
-        p.product_full_url,
-        p.product_name,
-        p.product_brand,
-        c.color_id,
-        c.color_name,
-        ps.original_price,
-        ps.sale_price,
-        ps.sale_percent,
-        ps.scraped_date
-    FROM aritzia_products.products p
-    JOIN aritzia_products.price_snapshots ps ON p.product_no = ps.product_no
-    JOIN aritzia_products.colors c ON ps.color_id = c.color_id
-    WHERE (ps.sale_price IS NOT NULL OR $2 = false)
-    ORDER BY p.product_no, c.color_id, ps.scraped_date DESC
-    LIMIT $1
-    `;
-
-  const values = [limit, saleOnly];
-
-  const result = await pool.query(sql, values);
-  return result.rows;
-}
-
 module.exports = {
   getProductPriceHistory,
   getProductPriceForDate,
-  getLatestPrices,
 };
 // 3. get available
