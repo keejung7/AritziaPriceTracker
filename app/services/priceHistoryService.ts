@@ -1,31 +1,46 @@
 export interface ProductPriceHistory {
-  productNo: number;
+  productNo: string;
   productUrl: string;
   productName: string | null;
   productBrand: string | null;
+  categories: string[];
   colors: ProductColorPriceHistory[];
 }
 
 export interface ProductColorPriceHistory {
   colorId: string;
   colorName: string | null;
+  swatchImageUrl: string | null;
+  productColorImageUrl: string | null;
+  stock: ProductStock[];
   history: ProductPrice[];
+}
+
+export interface ProductStock {
+  size: string;
+  status: string | null;
+  isAvailable: boolean;
 }
 
 export interface ProductPrice {
   originalPrice: number | null;
   salePrice: number | null;
   salePercent: number | null;
+  stock: ProductStock[];
   scrapedDate: string;
 }
 
 export interface RawPriceHistoryRow {
-  product_no: number;
+  product_no: string | number;
   product_full_url: string;
   product_name: string | null;
   product_brand: string | null;
+  categories: string[] | null;
   color_id: string;
   color_name: string | null;
+  swatch_image_url: string | null;
+  product_color_image_url: string | null;
+  stock?: RawProductStock[] | null;
   original_price: string | number | null;
   sale_price: string | number | null;
   sale_percent: string | number | null;
@@ -55,10 +70,11 @@ export function formatProductPriceHistory(
   const firstRow = rows[0];
 
   const product: ProductPriceHistory = {
-    productNo: Number(firstRow.product_no),
+    productNo: String(firstRow.product_no),
     productUrl: firstRow.product_full_url,
     productName: firstRow.product_name,
     productBrand: firstRow.product_brand,
+    categories: normalizeCategories(firstRow.categories),
     colors: [],
   };
 
@@ -72,6 +88,9 @@ export function formatProductPriceHistory(
       productColor = {
         colorId: row.color_id,
         colorName: row.color_name,
+        swatchImageUrl: row.swatch_image_url,
+        productColorImageUrl: row.product_color_image_url,
+        stock: normalizeStock(row.stock),
         history: [],
       };
 
@@ -83,6 +102,7 @@ export function formatProductPriceHistory(
       originalPrice: toNumberOrNull(row.original_price),
       salePrice: toNumberOrNull(row.sale_price),
       salePercent: toNumberOrNull(row.sale_percent),
+      stock: normalizeStock(row.stock),
       scrapedDate: toIsoString(row.scraped_date),
     });
   }
@@ -121,4 +141,28 @@ function toNumberOrNull(value: unknown): number | null {
 
 function toIsoString(value: Date | string): string {
   return new Date(value).toISOString();
+}
+
+function normalizeCategories(categories: string[] | null): string[] {
+  return Array.isArray(categories) ? categories : [];
+}
+
+interface RawProductStock {
+  size?: unknown;
+  status?: unknown;
+  isAvailable?: unknown;
+}
+
+function normalizeStock(stock: RawProductStock[] | null | undefined): ProductStock[] {
+  if (!Array.isArray(stock)) {
+    return [];
+  }
+
+  return stock
+    .map((item) => ({
+      size: typeof item.size === "string" ? item.size : "",
+      status: typeof item.status === "string" ? item.status : null,
+      isAvailable: item.isAvailable === true,
+    }))
+    .filter((item) => item.size !== "");
 }

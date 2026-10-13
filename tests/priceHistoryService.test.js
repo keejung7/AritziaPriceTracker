@@ -18,7 +18,7 @@ describe("priceHistoryService", () => {
       { ...product, color_id: "18891", color_name: "BROWN", original_price: "80", sale_price: "60", sale_percent: "0.25", scraped_date: "2026-06-04T10:00:00.000Z" },
     ];
     expect(formatProductPriceHistory(rows)).toMatchObject({
-      productNo: 123456,
+      productNo: '123456',
       productUrl: "https://www.aritzia.com/us/en/product/test-product/123456.html",
       productName: "Test Product",
       productBrand: "Aritzia",

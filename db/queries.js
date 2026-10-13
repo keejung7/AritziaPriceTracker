@@ -17,6 +17,32 @@ const pool = new Pool(
       },
 );
 
+const CATEGORY_TAGS_JOIN = `
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        array_agg(product_categories.category_slug ORDER BY product_categories.category_slug),
+        ARRAY[]::text[]
+      ) AS categories
+      FROM aritzia_products.product_categories
+      WHERE product_categories.product_no = ps.product_no
+    ) category_tags ON true
+`;
+
+// History must never borrow stock from another price observation. Recognized
+// positive statuses match the catalog read model; NULL/unknown cannot qualify.
+const HISTORY_STOCK_TAGS_JOIN = `
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'size', ss.product_size,
+        'status', ss.product_status,
+        'isAvailable', COALESCE(trim(ss.product_status) ~* '^(In Stock|Only a Few Left|Available)$', false)
+      ) ORDER BY ss.product_size), '[]'::jsonb) AS stock
+      FROM aritzia_products.stock_snapshots ss
+      WHERE ss.product_no = ps.product_no AND ss.color_id = ps.color_id
+        AND ss.scraped_date = ps.scraped_date
+    ) stock_tags ON true
+`;
+
 // TODO: remove after tests are added
 async function main() {
   try {
@@ -106,20 +132,28 @@ async function getProductPriceHistory({
   }
 
   const sql = `
-    SELECT 
+    SELECT
         p.product_no,
         p.product_full_url,
         p.product_name,
         p.product_brand,
+        category_tags.categories,
         c.color_id,
         c.color_name,
+        c.swatch_image_url,
+        pc.product_color_image_url,
+        stock_tags.stock,
         ps.original_price,
         ps.sale_price,
         ps.sale_percent,
         ps.scraped_date
     FROM aritzia_products.price_snapshots ps
     JOIN aritzia_products.products p ON ps.product_no = p.product_no
+    JOIN aritzia_products.product_colors pc
+      ON ps.color_id = pc.color_id AND ps.product_no = pc.product_no
     JOIN aritzia_products.colors c ON ps.color_id = c.color_id 
+    ${CATEGORY_TAGS_JOIN}
+    ${HISTORY_STOCK_TAGS_JOIN}
     WHERE ${where.join(" AND ")}
     ORDER BY ps.scraped_date DESC;
     `;

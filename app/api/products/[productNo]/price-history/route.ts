@@ -10,9 +10,9 @@ export async function GET(
   { params }: { params: Promise<{ productNo: string }> },
 ) {
   const { productNo: productNoParam } = await params;
-  const productNo = Number(productNoParam);
+  const productNo = productNoParam;
 
-  if (!Number.isInteger(productNo)) {
+  if (!/^[1-9]\d{0,18}$/.test(productNo) || BigInt(productNo) > BigInt('9223372036854775807')) {
     return NextResponse.json(
       { error: "Invalid product number" },
       { status: 400 },

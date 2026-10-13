@@ -1,0 +1,20 @@
+"use client";
+
+import { Chart } from '@highcharts/react/Highcharts';
+import 'highcharts/es-modules/masters/modules/accessibility.src.js';
+import { useReducedMotion } from '@mantine/hooks';
+import { formatCAD, type PricePoint } from '../../services/productChartService';
+
+export default function PriceHistoryChart({ points, descriptionId }: { points: PricePoint[]; descriptionId: string }) {
+  const reducedMotion = useReducedMotion();
+  return <Chart options={{
+    chart: { height: 340, backgroundColor: 'transparent', animation: !reducedMotion, style: { fontFamily: 'inherit', color: '#2B2825' } },
+    title: { text: undefined }, credits: { enabled: false }, legend: { enabled: false },
+    accessibility: { enabled: true, linkedDescription: `#${descriptionId}`, keyboardNavigation: { enabled: true }, point: { descriptionFormatter: point => { const p = point.options.custom as PricePoint; return `${p.date}, ${p.colorName}, ${formatCAD(p.y)}, regular ${formatCAD(p.regularPrice)}, ${p.discount ?? 0} percent discount.`; } } },
+    xAxis: { type: 'datetime', lineColor: '#D9D3CA', tickColor: '#D9D3CA', title: { text: 'Observation date (UTC)' } },
+    yAxis: { title: { text: 'Price (CAD)' }, gridLineColor: '#E8E2D9', labels: { formatter() { return formatCAD(Number(this.value)); } } },
+    tooltip: { useHTML: false, formatter() { const p = this.options.custom as PricePoint; return `${p.colorName} · ${p.date}<br/>Observed: ${p.observedAt}<br/>Price: ${formatCAD(p.effectivePrice)}<br/>Regular: ${formatCAD(p.regularPrice)}<br/>Discount: ${p.discount ?? 0}%`; } },
+    plotOptions: { series: { animation: reducedMotion ? false : { duration: 200 }, connectNulls: false } },
+    series: [{ type: 'line', name: 'Observed price', color: '#722F3D', lineWidth: 2, marker: { enabled: true, radius: 3 }, data: points.map(point => ({ x: point.x, y: point.y, custom: point })) }],
+  }} />;
+}
