@@ -1,0 +1,115 @@
+const fs = require('node:fs');
+const { randomBytes } = require('node:crypto');
+const { Pool } = require('pg');
+const { refreshCatalogReadModel } = require('../db/catalogReadModel');
+const { createDbLogger } = require('../db/loadLogging');
+const { validateTestDatabaseUrl } = require('./helpers/catalogTestDatabase');
+
+const connectionString = process.env.CATALOG_TEST_DATABASE_URL;
+describe('atomic catalog derivation in an isolated schema', () => {
+  let pool, client, schema, scopedPool, logPath, result;
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: validateTestDatabaseUrl(connectionString) });
+    client = await pool.connect();
+    schema = `catalog_test_${randomBytes(8).toString('hex')}`;
+    logPath = `/private/tmp/${schema}.log`;
+    const raw = fs.readFileSync(require.resolve('./fixtures/originalRawSchema.sql'), 'utf8');
+    const migration = fs.readFileSync(require.resolve('../db/migrations/009_add_catalog_read_model.sql'), 'utf8');
+    await client.query(raw.replaceAll('aritzia_products', schema));
+    await client.query(migration.replaceAll('aritzia_products', schema));
+    scopedPool = { connect: async () => ({
+      query: (sql, values) => client.query(sql.replaceAll('aritzia_products', schema), values),
+      release() {},
+    }) };
+  });
+  afterAll(async () => {
+    if (schema) await client.query(`DROP SCHEMA ${schema} CASCADE`);
+    client?.release();
+    await pool?.end();
+  });
+  const query = (sql, values) => client.query(sql.replaceAll('aritzia_products', schema), values);
+  const logger = () => createDbLogger({ logPath, info: () => {}, error: () => {}, warn: () => {} });
+  async function observe(product, color, price, date, statuses) {
+    await query(`INSERT INTO aritzia_products.products VALUES ($1::bigint,$2,$2,$2,'Brand') ON CONFLICT DO NOTHING`, [product,String(product)]);
+    await query(`INSERT INTO aritzia_products.colors(color_id) VALUES($1) ON CONFLICT DO NOTHING`, [color]);
+    await query(`INSERT INTO aritzia_products.product_colors(color_id,product_no) VALUES($1,$2) ON CONFLICT DO NOTHING`, [color,product]);
+    await query(`INSERT INTO aritzia_products.price_snapshots(color_id,product_no,original_price,scraped_date) VALUES($1,$2,$3,$4)`, [color,product,price,date]);
+    for (const [i,status] of (statuses || []).entries()) await query(`INSERT INTO aritzia_products.stock_snapshots VALUES($1,$2,$3,$4,$5)`, [`size${i}`,color,product,status,date]);
+  }
+  beforeEach(async () => {
+    await query(`TRUNCATE aritzia_products.products, aritzia_products.colors,
+      aritzia_products.categories, aritzia_products.catalog_snapshots RESTART IDENTITY CASCADE`);
+    await observe(1,'a',50,'2026-10-13T12:00Z',[' In Stock ','Sold Out']);
+    await observe(1,'b',50,'2026-10-13T12:00Z',['Only a Few Left']);
+    await observe(1,'a',50,'2026-06-01T12:00Z',['Available']);
+    await observe(1,'a',60,'2026-07-16T00:00Z',['available']);
+    await observe(1,'a',60,'2026-07-15T23:59Z',['AVAILABLE']);
+    await observe(1,'c',1,'2026-10-13T12:00Z',['Sold Out']);
+    await observe(1,'d',2,'2026-10-13T12:00Z',['Coming Soon']);
+    await observe(2,'a',30,'2026-10-13T12:00Z',['Sold Out','Unavailable']);
+    await observe(3,'a',20,'2026-10-12T12:00Z',[]);
+    await query(`INSERT INTO aritzia_products.stock_snapshots VALUES('S','a',3,'In Stock','2026-10-13T12:00Z')`);
+    await observe(4,'a',10,'2026-10-13T12:00Z',[null]);
+    await observe(5,'a',10,'2026-10-13T12:00Z',['Coming Soon']);
+    await observe(6,'a',10,'2026-06-01T12:00Z',['Available']);
+    await observe(6,'a',20,'2026-10-13T12:00Z',['Available']);
+    await observe(7,'a',10,'2026-09-01T12:00Z',['Available']);
+    await observe(7,'a',20,'2026-10-13T12:00Z',['Available']);
+    await query(`INSERT INTO aritzia_products.categories VALUES('tops'),('sale')`);
+    await query(`INSERT INTO aritzia_products.product_categories VALUES(1,'tops'),(1,'sale')`);
+    await query(`UPDATE aritzia_products.colors SET color_name='Black',swatch_image_url='https://example.com/swatch' WHERE color_id='a'`);
+    await query(`UPDATE aritzia_products.product_colors SET product_color_image_url='https://example.com/product' WHERE product_no=1 AND color_id='a'`);
+    result = await refreshCatalogReadModel(scopedPool,{ logger:logger() });
+  });
+  test('exact stock eligibility, deterministic daily minima, bounded history and label priority', async () => {
+    expect(result.productCount).toBe(7);
+    expect(result.colorCount).toBe(10);
+    const colors = (await query(`SELECT product_no,color_id,availability_status,available_sizes FROM aritzia_products.catalog_product_colors WHERE snapshot_id=$1 ORDER BY product_no,color_id`,[result.snapshotId])).rows;
+    expect(colors[0]).toMatchObject({ availability_status:'available',available_sizes:['size0'] });
+    expect(colors[4].availability_status).toBe('sold_out');
+    expect(colors.slice(5,8).map(c=>c.availability_status)).toEqual(['unknown','unknown','unknown']);
+    const products = (await query(`SELECT product_no,from_price,insight_label FROM aritzia_products.catalog_products WHERE snapshot_id=$1 ORDER BY product_no`,[result.snapshotId])).rows;
+    expect(products[0]).toMatchObject({ from_price:'50',insight_label:'Lowest ever' });
+    expect(products.slice(1,5).map(p=>p.from_price)).toEqual([null,null,null,null]);
+    expect(products[5].insight_label).toBe('Lowest in 90 days');
+    expect(products[6].insight_label).toBe('Lowest in 30 days');
+    expect((await query(`SELECT categories FROM aritzia_products.catalog_products WHERE snapshot_id=$1 AND product_no=1`,[result.snapshotId])).rows[0].categories).toEqual(['sale','tops']);
+    expect((await query(`SELECT color_name,swatch_image_url,product_color_image_url FROM aritzia_products.catalog_product_colors WHERE snapshot_id=$1 AND product_no=1 AND color_id='a'`,[result.snapshotId])).rows[0]).toEqual({color_name:'Black',swatch_image_url:'https://example.com/swatch',product_color_image_url:'https://example.com/product'});
+    const history = (await query(`SELECT product_no,color_id,observation_date::text FROM aritzia_products.catalog_product_price_history WHERE snapshot_id=$1 ORDER BY product_no,observation_date`,[result.snapshotId])).rows;
+    expect(history).toEqual([
+      { product_no:'1',color_id:'a',observation_date:'2026-07-16' },
+      { product_no:'1',color_id:'a',observation_date:'2026-10-13' },
+      { product_no:'6',color_id:'a',observation_date:'2026-10-13' },
+      { product_no:'7',color_id:'a',observation_date:'2026-09-01' },
+      { product_no:'7',color_id:'a',observation_date:'2026-10-13' },
+    ]);
+    const log = fs.readFileSync(logPath,'utf8');
+    expect(log).toContain('stage=derive_all_time_lows queryDurationMs=');
+    expect(log).toContain('totalDurationMs=');
+    expect(log).toContain('productCount=7 colorCount=10 historyCount=5');
+  });
+  test('failed activation preserves previous active snapshot and raw observations', async () => {
+    const old = (await query(`SELECT snapshot_id FROM aritzia_products.catalog_snapshots WHERE status='active'`)).rows[0].snapshot_id;
+    await query(`CREATE FUNCTION ${schema}.reject_activation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status='active' THEN RAISE EXCEPTION 'activation rejected'; END IF; RETURN NEW; END $$`);
+    await query(`CREATE TRIGGER reject_activation BEFORE UPDATE ON aritzia_products.catalog_snapshots FOR EACH ROW EXECUTE FUNCTION ${schema}.reject_activation()`);
+    await expect(refreshCatalogReadModel(scopedPool,{logger:logger()})).rejects.toThrow('activation rejected');
+    expect((await query(`SELECT snapshot_id FROM aritzia_products.catalog_snapshots WHERE status='active'`)).rows).toEqual([{snapshot_id:old}]);
+    expect(Number((await query(`SELECT count(*) FROM aritzia_products.price_snapshots`)).rows[0].count)).toBe(15);
+    expect(fs.readFileSync(logPath,'utf8')).toContain('failed stage=activate_snapshot');
+    await query(`DROP TRIGGER reject_activation ON aritzia_products.catalog_snapshots`);
+  });
+  test('keeps active and two most recent inactive snapshots', async () => {
+    for (let i=0;i<3;i++) await refreshCatalogReadModel(scopedPool,{logger:logger()});
+    expect((await query(`SELECT status,count(*)::int AS count FROM aritzia_products.catalog_snapshots GROUP BY status ORDER BY status`)).rows).toEqual([{status:'active',count:1},{status:'inactive',count:2}]);
+  });
+  test('warning regressions persist to DB_LOG_PATH and still publish', async () => {
+    const previous = (await query(`SELECT snapshot_id FROM aritzia_products.catalog_snapshots WHERE status='active'`)).rows[0].snapshot_id;
+    await query(`DELETE FROM aritzia_products.catalog_products WHERE snapshot_id=$1 AND product_no=7`,[previous]);
+    // Inflate the previous color count without changing the raw catalog.
+    await query(`INSERT INTO aritzia_products.colors(color_id) VALUES('extra')`);
+    await query(`INSERT INTO aritzia_products.product_colors(color_id,product_no) VALUES('extra',1)`);
+    await query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,scraped_date) VALUES($1,1,'extra',now())`,[previous]);
+    await refreshCatalogReadModel(scopedPool,{logger:logger(),warningRegressionRatio:0.95});
+    expect(fs.readFileSync(logPath,'utf8')).toContain('warning color count regression: 11 -> 10');
+  });
+});

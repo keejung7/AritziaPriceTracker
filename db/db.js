@@ -3,6 +3,7 @@ const dotenv = require("dotenv").config();
 const { Pool } = pg;
 
 const parser = require("./parser.js");
+const { refreshCatalogReadModel } = require("./catalogReadModel.js");
 const MAX_BATCH_PARAMS = 5000;
 
 const pool = new Pool(
@@ -26,6 +27,7 @@ async function main() {
   const rows = collectRowsForInsert(products);
 
   await saveParsedProducts(pool, rows);
+  await refreshCatalogReadModel(pool);
 
   await pool.end();
 }

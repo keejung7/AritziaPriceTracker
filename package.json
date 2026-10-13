@@ -20,6 +20,7 @@
     "build": "next build",
     "start": "next start",
     "pipeline": "node run_pipeline.js",
+    "refresh-catalog": "node db/refresh_catalog_read_model.js",
     "test": "jest --runInBand --watchman=false --testPathIgnorePatterns=\\.integration\\.test\\.js$ --passWithNoTests",
     "test:db": "jest --runInBand --watchman=false --testMatch='**/*.integration.test.js'"
   },
