@@ -22,7 +22,7 @@ The implementation spans the scraper database pipeline, a derived PostgreSQL rea
 
 - Predicting future prices or assigning an inferred deal-quality score.
 - Claiming knowledge of prices before tracking began.
-- Making catalog sparklines fully interactive.
+- Rendering price-history charts on catalog cards.
 - Persisting catalog filters in URL parameters in the first version.
 - Incrementally rebuilding only affected products in the first version.
 
@@ -81,12 +81,11 @@ Each product card presents:
 1. Product image
 2. Brand and product name
 3. `From` price, paired regular price, and discount when applicable
-4. One always-visible 90-day SVG sparkline
-5. At most one historical-low label
-6. Selected color name and its actual current price
-7. The selected color's regular price and discount when it is on sale
-8. Actual available size labels
-9. Color swatches
+4. At most one historical-low label
+5. Selected color name and its actual current price
+6. The selected color's regular price and discount when it is on sale
+7. Actual available size labels
+8. Color swatches
 
 Category chips, color counts, deal scores, popularity scores, scarcity scores, and redundant section headings do not appear on cards.
 
@@ -94,7 +93,7 @@ Category chips, color counts, deal scores, popularity scores, scarcity scores, a
 
 The default selected color is the color establishing `From`. Selecting a swatch updates the image, selected color name, selected-color effective and regular prices, selected-color discount, and available sizes.
 
-The card's primary `From` block and product-wide sparkline remain stable when swatches change. A selected color that differs from `From` must always expose its actual price. Examples:
+The card's primary `From` block remains stable when swatches change. A selected color that differs from `From` must always expose its actual price. Examples:
 
 ```text
 From $48.99   $98 · 50% off
@@ -105,23 +104,9 @@ For a full-price selected color, omit `0% off` and the crossed-out price.
 
 Sold-out colors remain available as swatches and retain their image, current known price, and history. Selecting one displays `Currently unavailable` and no available size labels.
 
-### Catalog sparkline
+### Catalog historical cue
 
-There is one sparkline per product, not one per color. It renders the product-wide daily-minimum series and therefore corresponds to the stable `From` methodology.
-
-Implement it as a native, non-interactive SVG rather than a Highcharts instance:
-
-- Responsive `viewBox`, visually about 100–140 px wide and 32–40 px high
-- Four-pixel internal padding
-- Timestamp mapped to x and effective price mapped to y
-- Separate path segments across missing-day gaps
-- One path, no per-point DOM markers
-- `vector-effect="non-scaling-stroke"`
-- A centered horizontal line for constant-price history
-- A reserved placeholder reading `Price history is still building` for fewer than two valid points
-- Accessible title/description summarizing the range and period
-
-The component consumes the same normalized price-point contract as the product-detail chart and is memoized. Exact interactive inspection belongs on the product page.
+Catalog cards do not render a price-history chart. The prioritized factual low label is the only historical cue on the card. Exact trends and point inspection belong on the product-detail page, where the chart has enough space to be legible.
 
 ## Catalog Sorting and Filtering
 
@@ -188,9 +173,9 @@ The product-detail API continues to query normalized raw price and stock history
 
 Highcharts may ship only when the deployment's license is appropriate for its use. If licensing is not confirmed, implementation stops for a product decision rather than silently shipping unlicensed use.
 
-## Shared Price-Point Contract
+## Product-Detail Price-Point Contract
 
-Both native SVG and Highcharts renderers consume ordered points equivalent to:
+Highcharts product-detail views consume ordered points equivalent to:
 
 ```ts
 interface PricePoint {
@@ -325,9 +310,9 @@ Response envelope:
 }
 ```
 
-Each item is one complete product with its current colors, sizes, selected/default state, and 90-day sparkline points.
+Each item is one complete product with its current colors, sizes, selected/default state, and prioritized historical-low label.
 
-The catalog query first selects the page of product identifiers from `catalog_products`, then joins or aggregates colors and history only for those products. It must not expand all product/color/history rows before applying the product page limit. Responses include no more than 90 sparkline points per product and use normal HTTP response compression.
+The catalog query first selects the page of product identifiers from `catalog_products`, then joins or aggregates colors only for those products. It must not expand all product/color rows before applying the product page limit. Catalog responses do not include historical point arrays and use normal HTTP response compression.
 
 ### Cursor pagination
 
@@ -372,7 +357,7 @@ Use warm ivory instead of pure white, charcoal instead of black, oxblood as the 
 
 Use sentence-case labels and a refined system sans stack beginning with `Avenir Next` and `Helvetica Neue`. Body text uses 400, labels 500, and prices/headings approximately 600–650 rather than pervasive 800–850. Prices use tabular numerals.
 
-Highcharts and SVG sparklines use the same charcoal, oxblood, and separator tokens.
+Highcharts uses the same charcoal, oxblood, and separator tokens as the rest of the interface.
 
 ## Accessibility and Responsive Behavior
 
@@ -382,7 +367,6 @@ Highcharts and SVG sparklines use the same charcoal, oxblood, and separator toke
 - Selection never relies on color alone.
 - Show an initial swatch subset plus `+N`; expansion must not create page-level horizontal overflow.
 - Available size labels wrap within the card.
-- Sparkline SVGs use an accessible title/description.
 - Highcharts enables its accessibility module and keyboard navigation.
 - Respect reduced-motion preferences.
 - Price reductions remain understandable without color through regular price, strikethrough, and percentage text.
@@ -393,7 +377,6 @@ Highcharts and SVG sparklines use the same charcoal, oxblood, and separator toke
 - Dynamically import and code-split Highcharts so it is loaded only on product-detail views and does not enter the catalog bundle.
 - Lazy-load product images while reserving their final dimensions.
 - Debounce search/filter requests and abort superseded network requests.
-- Memoize normalized sparkline points and SVG path generation. Each catalog sparkline renders one path with no per-point DOM nodes.
 - Request and mount 24 products at a time.
 - Apply `content-visibility: auto` or an equivalent off-screen rendering optimization to catalog cards after browser verification.
 - Monitor accumulated DOM size when users repeatedly select `Load more`. If realistic use produces unacceptable interaction or scrolling performance, introduce windowing or discard sufficiently old mounted pages while retaining pagination state.
@@ -406,7 +389,7 @@ Highcharts and SVG sparklines use the same charcoal, oxblood, and separator toke
 - No valid snapshot: full-page unavailable state with retry.
 - Stale snapshot: retain usable results with a quiet last-updated notice.
 - Missing image: neutral ivory placeholder.
-- Fewer than two history points: reserved sparkline space with `Price history is still building`.
+- Fewer than two history points on the product page: reserve the chart area and show `Price history is still building`.
 - Missing stock observation: `Availability unavailable`; do not infer sold out.
 - Selected sold-out color: `Currently unavailable`, with no available-size labels.
 - Partial color failure: retain valid colors and exclude the failed color from minimum calculations.
@@ -436,7 +419,7 @@ Implementation verification must include:
 - API contract tests for filters, totals, cursors, typed errors, and snapshot metadata.
 - UI tests for swatch state, selected-color price/discount, size labels, sold-out state, filter behavior, and accessible names.
 - Visual/responsive checks for editorial tokens, card hierarchy, mobile filter drawer, chart placeholders, and layout stability.
-- Performance measurement using a realistic catalog page. Native SVG card sparklines are retained unless measured rendering or scrolling performance is unacceptable.
+- Performance measurement using a realistic catalog page and product-detail chart.
 - Production build and TypeScript checks.
 
 ## Delivery Sequence
@@ -444,7 +427,7 @@ Implementation verification must include:
 1. Add read-model migrations and refresh logic without switching the UI.
 2. Backfill and validate an initial active snapshot.
 3. Add the product-centric API and contract tests.
-4. Build shared price-point adapters, native SVG sparklines, and Highcharts detail components.
+4. Build shared price-point adapters and Highcharts detail components.
 5. Replace the catalog UI, filters, sorting, pagination, and states.
 6. Replace the product-detail charts and selected-color interaction.
 7. Apply the shared editorial theme and accessibility behavior.
