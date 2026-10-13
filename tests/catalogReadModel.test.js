@@ -1,3 +1,4 @@
+/** @jest-environment node */
 const { refreshCatalogReadModel } = require('../db/catalogReadModel');
 
 function fixture({ failStage, failMarker = false, previous = 10, current = 10 } = {}) {

@@ -1,3 +1,4 @@
+/** @jest-environment node */
 const fs = require('node:fs');
 const { randomBytes } = require('node:crypto');
 const { Pool } = require('pg');

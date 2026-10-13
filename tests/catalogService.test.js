@@ -1,5 +1,6 @@
-const { parseCatalogQuery, getCatalogProducts } = require('../.test-dist/app/services/catalogService');
-const { decodeCatalogCursor } = require('../.test-dist/app/services/catalogCursor');
+/** @jest-environment node */
+const { parseCatalogQuery, getCatalogProducts } = require('../app/services/catalogService');
+const { decodeCatalogCursor } = require('../app/services/catalogCursor');
 const parse = input => parseCatalogQuery(new URLSearchParams(input));
 test('defaults and deduplicates sizes',()=>{
   expect(parse('')).toMatchObject({limit:24,sort:'discount-desc',sizes:[],cursor:null});

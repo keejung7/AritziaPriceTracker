@@ -1,4 +1,5 @@
-const { encodeCatalogCursor, decodeCatalogCursor } = require('../.test-dist/app/services/catalogCursor');
+/** @jest-environment node */
+const { encodeCatalogCursor, decodeCatalogCursor } = require('../app/services/catalogCursor');
 test.each([12.5, null])('cursor preserves snapshot and nullable value %s', lastSortValue => {
   const cursor = { snapshotId:'12',sort:'discount-desc',lastSortValue,lastProductNo:'123' };
   expect(decodeCatalogCursor(encodeCatalogCursor(cursor),'discount-desc')).toEqual(cursor);

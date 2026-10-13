@@ -1,3 +1,4 @@
+/** @jest-environment node */
 const { createCatalogTestDatabase, validateTestDatabaseUrl } = require('./helpers/catalogTestDatabase');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');

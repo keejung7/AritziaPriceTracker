@@ -1,6 +1,7 @@
+/** @jest-environment node */
 const { createCatalogTestDatabase } = require('./helpers/catalogTestDatabase');
-const { getCatalogProducts, parseCatalogQuery } = require('../.test-dist/app/services/catalogService');
-const { decodeCatalogCursor } = require('../.test-dist/app/services/catalogCursor');
+const { getCatalogProducts, parseCatalogQuery } = require('../app/services/catalogService');
+const { decodeCatalogCursor } = require('../app/services/catalogCursor');
 const { buildCatalogQuery } = require('../db/catalogQueries');
 describe('same-color catalog and snapshot pagination',()=>{
   let db;

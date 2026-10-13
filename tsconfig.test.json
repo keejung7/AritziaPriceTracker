@@ -1,8 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": false,
-    "outDir": ".test-dist",
+    "noEmit": true,
     "rootDir": ".",
     "module": "commonjs",
     "moduleResolution": "node",
@@ -12,7 +11,10 @@
     "ignoreDeprecations": "6.0"
   },
   "include": [
-    "app/services/priceHistoryService.ts",
-    "app/services/catalog*.ts"
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "jest.setup.ts"
   ]
 }

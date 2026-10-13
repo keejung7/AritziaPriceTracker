@@ -22,11 +22,17 @@
     "pipeline": "node run_pipeline.js",
     "refresh-catalog": "node db/refresh_catalog_read_model.js",
     "test": "jest --runInBand --watchman=false --testPathIgnorePatterns=\\.integration\\.test\\.js$ --passWithNoTests",
-    "test:db": "jest --runInBand --watchman=false --testMatch='**/*.integration.test.js'"
+    "test:db": "jest --runInBand --watchman=false --testMatch='**/*.integration.test.js'",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/jest": "^30.0.0",
     "@types/react": "19.2.16",
     "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.5.2",
     "typescript": "6.0.3"
   }
 }
