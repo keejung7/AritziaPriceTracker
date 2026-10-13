@@ -19,7 +19,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "pipeline": "node run_pipeline.js"
+    "pipeline": "node run_pipeline.js",
+    "test": "jest --runInBand --watchman=false --testPathIgnorePatterns=\\.integration\\.test\\.js$ --passWithNoTests",
+    "test:db": "jest --runInBand --watchman=false --testMatch='**/*.integration.test.js'"
   },
   "devDependencies": {
     "@types/react": "19.2.16",
