@@ -29,22 +29,21 @@ export function parseCatalogQuery(params: URLSearchParams): CatalogQuery {
 }
 
 const numeric = (value: unknown): number | null => value == null ? null : Number(value);
-const iso = (value: string | Date): string => new Date(value).toISOString();
 export async function getCatalogProducts(query: CatalogQuery, database?: { query: (sql: string, values: unknown[]) => Promise<any> }): Promise<CatalogResponse> {
   const result = await queryCatalogProducts(query,database);
   if (!result.snapshot) throw new CatalogError(query.cursor ? 'cursor_expired' : 'catalog_unavailable',query.cursor ? 400 : 503,
     query.cursor ? 'This catalog cursor has expired' : 'The catalog is temporarily unavailable');
   const products = result.products.map(p=>({
-    productNo:Number(p.product_no),productSlug:p.product_slug,productUrl:p.product_full_url,productName:p.product_name,productBrand:p.product_brand,
+    productNo:p.product_no,productSlug:p.product_slug,productUrl:p.product_full_url,productName:p.product_name,productBrand:p.product_brand,
     categories:p.categories,fromColorId:p.from_color_id,fromPrice:numeric(p.from_price),fromOriginalPrice:numeric(p.from_original_price),
     fromSalePercent:numeric(p.from_sale_percent),selectedColorId:p.selected_color_id,availabilityStatus:p.availability_status,
-    trackingStartedAt:p.tracking_started_at ? iso(p.tracking_started_at) : null,insightLabel:p.insight_label,
+    trackingStartedAt:p.tracking_started_at,insightLabel:p.insight_label,
     colors:p.colors.map(c=>({colorId:c.color_id,colorName:c.color_name,swatchImageUrl:c.swatch_image_url,productColorImageUrl:c.product_color_image_url,
       originalPrice:numeric(c.original_price),salePrice:numeric(c.sale_price),effectivePrice:numeric(c.effective_price),salePercent:numeric(c.sale_percent),
-      availableSizes:c.available_sizes,availabilityStatus:c.availability_status,scrapedDate:iso(c.scraped_date)})),
+      availableSizes:c.available_sizes,availabilityStatus:c.availability_status,scrapedDate:c.scraped_date})),
   }));
   const last=result.products[result.products.length-1];
   const lastSortValue=last?.cursor_sort_value == null ? null : ['discount-desc','price-asc','price-desc'].includes(query.sort) ? Number(last.cursor_sort_value) : last.cursor_sort_value;
   return {products,total:result.total,nextCursor:result.has_more && last ? encodeCatalogCursor({snapshotId:String(result.snapshot.snapshot_id),sort:query.sort,lastProductNo:String(last.product_no),lastSortValue}) : null,
-    snapshot:{id:String(result.snapshot.snapshot_id),dataAsOf:iso(result.snapshot.data_as_of),refreshedAt:iso(result.snapshot.activated_at),status:result.snapshot.stale ? 'stale' : 'active'}};
+    snapshot:{id:result.snapshot.snapshot_id,dataAsOf:result.snapshot.data_as_of,refreshedAt:result.snapshot.activated_at,status:result.snapshot.stale ? 'stale' : 'active'}};
 }

@@ -35,7 +35,7 @@ export interface CatalogColor {
   scrapedDate: string;
 }
 export interface CatalogProduct {
-  productNo: number;
+  productNo: string;
   productSlug: string | null;
   productUrl: string | null;
   productName: string | null;

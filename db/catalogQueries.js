@@ -53,6 +53,8 @@ function buildCatalogQuery(q) {
   }
   const limit=bind(q.limit);
   const order=`unavailable ASC,sort_value ${sort.direction} NULLS LAST,product_no ASC`;
+  const utc = column => `to_char(${column} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+  const cursorSortValue = sort.type === 'timestamptz' ? utc('t.sort_value') : 't.sort_value::text';
   const text=`WITH snapshot AS (
       SELECT cs.*, EXISTS(SELECT 1 FROM aritzia_products.catalog_snapshots failed WHERE failed.status='failed' AND failed.snapshot_id>cs.snapshot_id) AS stale
       FROM aritzia_products.catalog_snapshots cs
@@ -70,12 +72,15 @@ function buildCatalogQuery(q) {
     ), trimmed AS (
       SELECT * FROM page ORDER BY ${order} LIMIT ${limit}::int
     )
-    SELECT (SELECT row_to_json(snapshot) FROM snapshot) AS snapshot,
+    SELECT (SELECT jsonb_build_object('snapshot_id',snapshot_id::text,'data_as_of',${utc('data_as_of')},
+      'activated_at',${utc('activated_at')},'stale',stale) FROM snapshot) AS snapshot,
       (SELECT count(*)::int FROM eligible) AS total,
       (SELECT count(*)>${limit}::int FROM page) AS has_more,
-      COALESCE((SELECT jsonb_agg(to_jsonb(items) ORDER BY items.unavailable ASC,items.sort_value ${sort.direction} NULLS LAST,items.product_no ASC)
-      FROM (SELECT t.*,t.sort_value::text AS cursor_sort_value,
-        (SELECT COALESCE(jsonb_agg(to_jsonb(c) ORDER BY c.color_id),'[]'::jsonb)
+      COALESCE((SELECT jsonb_agg(to_jsonb(items) || jsonb_build_object('product_no',items.product_no::text,
+        'tracking_started_at',${utc('items.tracking_started_at')}) ORDER BY items.unavailable ASC,items.sort_value ${sort.direction} NULLS LAST,items.product_no ASC)
+      FROM (SELECT t.*,${cursorSortValue} AS cursor_sort_value,
+        (SELECT COALESCE(jsonb_agg(to_jsonb(c) || jsonb_build_object('product_no',c.product_no::text,
+          'snapshot_id',c.snapshot_id::text,'scraped_date',${utc('c.scraped_date')}) ORDER BY c.color_id),'[]'::jsonb)
          FROM aritzia_products.catalog_product_colors c WHERE c.snapshot_id=t.snapshot_id AND c.product_no=t.product_no) AS colors
         FROM trimmed t) items),'[]'::jsonb) AS products`;
   return {text,values};

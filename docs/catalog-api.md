@@ -12,14 +12,17 @@ and color ID `color`, repeated `size`, nonnegative `minPrice`/`maxPrice`,
 Sizes are OR; all other variant predicates must match the same available color.
 Prices use effective price. Sale requires a sale price below original price.
 
-Each product contains its global From metadata (`fromColorId`, `fromPrice`,
+Each product identifies `productNo` as a decimal string so bigint identifiers
+remain exact. Each product contains its global From metadata (`fromColorId`, `fromPrice`,
 `fromOriginalPrice`, `fromSalePercent`), `selectedColorId`, metadata, availability,
 tracking start, insight label, and all current snapshot colors. A filtered
 selection chooses the cheapest qualifying color; the From metadata stays paired
 with the global From color. Without variant filters, unavailable products remain
 and sort after available products. Every sort breaks ties by product number.
 No price history arrays or score fields are included. Numeric prices are JSON
-numbers and dates are ISO strings.
+numbers and dates are canonical UTC ISO strings. Timestamp precision from the
+database is retained, including six fractional digits when present. Snapshot
+IDs and cursor identifiers are decimal strings too.
 
 Keep sort and filters unchanged while following `nextCursor`; cursors are
 versioned, bind to a retained snapshot, and do not advance to a newly active

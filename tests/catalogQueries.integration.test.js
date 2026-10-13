@@ -40,7 +40,7 @@ describe('same-color catalog and snapshot pagination',()=>{
     expect(first.products.flatMap(p=>p.colors)).toHaveLength(48);
     expect(first.total).toBe(30);
     const second=await get('cursor='+first.nextCursor);
-    expect([...first.products,...second.products].map(p=>p.productNo)).toEqual(Array.from({length:30},(_,i)=>i+1));
+    expect([...first.products,...second.products].map(p=>p.productNo)).toEqual(Array.from({length:30},(_,i)=>String(i+1)));
     expect(second.nextCursor).toBeNull();
     expect(second.products.at(-1).availabilityStatus).toBe('sold_out');
   });
@@ -51,7 +51,7 @@ describe('same-color catalog and snapshot pagination',()=>{
     await db.query(`INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of,activated_at) VALUES(2,'active',now(),now())`);
     const second=await get('limit=2&cursor='+first.nextCursor);
     expect(second.snapshot.id).toBe('1');
-    expect(second.products.map(p=>p.productNo)).toEqual([3,4]);
+    expect(second.products.map(p=>p.productNo)).toEqual(['3','4']);
     await db.query(`DELETE FROM aritzia_products.catalog_snapshots WHERE snapshot_id=1`);
     await expect(get('cursor='+first.nextCursor)).rejects.toMatchObject({code:'cursor_expired',status:400});
   });
@@ -67,14 +67,40 @@ describe('same-color catalog and snapshot pagination',()=>{
       const page=await get(`limit=7&sort=${sort}${cursor?'&cursor='+cursor:''}`);
       ids.push(...page.products.map(p=>p.productNo)); cursor=page.nextCursor;
     } while(cursor);
-    expect(ids).toHaveLength(30); expect(new Set(ids).size).toBe(30); expect(ids.at(-1)).toBe(30);
+    expect(ids).toHaveLength(30); expect(new Set(ids).size).toBe(30); expect(ids.at(-1)).toBe('30');
   });
   test('descending prices paginate differing values and ties before unavailable products',async()=>{
     await db.query(`UPDATE aritzia_products.catalog_product_colors SET effective_price=CASE product_no WHEN 1 THEN 90 WHEN 2 THEN 70 WHEN 3 THEN 70 ELSE 20 END WHERE color_id='red'`);
     const first=await get('limit=2&sort=price-desc');
-    expect(first.products.map(p=>p.productNo)).toEqual([1,2]);
+    expect(first.products.map(p=>p.productNo)).toEqual(['1','2']);
     const second=await get('limit=2&sort=price-desc&cursor='+first.nextCursor);
-    expect(second.products.map(p=>p.productNo)).toEqual([3,4]);
+    expect(second.products.map(p=>p.productNo)).toEqual(['3','4']);
+  });
+  test('preserves bigint identifiers and six-digit UTC timestamps through continuation and expiry',async()=>{
+    const snapshot='9007199254740993';
+    const firstId='9007199254740993', secondId='9007199254740994';
+    const timestamp='2024-02-29T12:34:56.123456Z';
+    await db.query(`TRUNCATE aritzia_products.products,aritzia_products.colors,aritzia_products.catalog_snapshots RESTART IDENTITY CASCADE`);
+    await db.query(`INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of,activated_at)
+      VALUES($1,'active',$2::timestamptz,$2::timestamptz)`,[snapshot,timestamp]);
+    await db.query(`INSERT INTO aritzia_products.products(product_no,product_slug,product_full_url,product_name)
+      VALUES($1,$1::bigint::text,'https://example.com/first','First'),($2,$2::bigint::text,'https://example.com/second','Second')`,[firstId,secondId]);
+    await db.query(`INSERT INTO aritzia_products.colors(color_id,color_name) VALUES('red','Red')`);
+    await db.query(`INSERT INTO aritzia_products.product_colors(product_no,color_id) VALUES($1,'red'),($2,'red')`,[firstId,secondId]);
+    await db.query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,effective_price,sale_percent,available_sizes,availability_status,scraped_date)
+      VALUES($1,$2,'red',50,50,ARRAY['M'],'available',$4::timestamptz),($1,$3,'red',50,50,ARRAY['M'],'available',$4::timestamptz)`,[snapshot,firstId,secondId,timestamp]);
+    await db.query(`INSERT INTO aritzia_products.catalog_products(snapshot_id,product_no,product_name,from_color_id,availability_status,tracking_started_at)
+      VALUES($1,$2,'First','red','available',$4::timestamptz),($1,$3,'Second','red','available',$4::timestamptz)`,[snapshot,firstId,secondId,timestamp]);
+    const first=await get('limit=1&sort=observed-desc');
+    expect(first.snapshot).toMatchObject({id:snapshot,dataAsOf:timestamp,refreshedAt:timestamp});
+    expect(first.products[0]).toMatchObject({productNo:firstId,trackingStartedAt:timestamp});
+    expect(first.products[0].colors[0].scrapedDate).toBe(timestamp);
+    expect(decodeCatalogCursor(first.nextCursor,'observed-desc')).toMatchObject({snapshotId:snapshot,lastProductNo:firstId,lastSortValue:timestamp});
+    const second=await get(`limit=1&sort=observed-desc&cursor=${first.nextCursor}`);
+    expect(second.products.map(p=>p.productNo)).toEqual([secondId]);
+    expect(second.nextCursor).toBeNull();
+    await db.query(`DELETE FROM aritzia_products.catalog_snapshots WHERE snapshot_id=$1`,[snapshot]);
+    await expect(get(`sort=observed-desc&cursor=${first.nextCursor}`)).rejects.toMatchObject({code:'cursor_expired',status:400});
   });
   test('profiles default, combined variant filters, exact total, and continuation',async()=>{
     // Increase cardinality without touching the raw observations or user schemas.

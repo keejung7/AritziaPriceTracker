@@ -17,3 +17,11 @@ test('rejects a date-like string that is not an observation timestamp',()=>{
   const raw=Buffer.from(JSON.stringify({v:1,snapshotId:'1',sort:'observed-desc',lastSortValue:'1',lastProductNo:'2'})).toString('base64url');
   expect(()=>decodeCatalogCursor(raw,'observed-desc')).toThrow();
 });
+test.each(['2026-02-30T00:00:00Z','2025-02-29T00:00:00Z','2026-01-01T24:00:00Z','2026-01-01T00:00:00+00:00'])('rejects impossible or noncanonical observation timestamp %s',timestamp=>{
+  const raw=Buffer.from(JSON.stringify({v:1,snapshotId:'1',sort:'observed-desc',lastSortValue:timestamp,lastProductNo:'2'})).toString('base64url');
+  expect(()=>decodeCatalogCursor(raw,'observed-desc')).toThrow(expect.objectContaining({code:'invalid_cursor',status:400}));
+});
+test('preserves six-digit UTC timestamp and bigint identifiers',()=>{
+  const cursor={snapshotId:'9007199254740993',sort:'observed-desc',lastSortValue:'2024-02-29T12:34:56.123456Z',lastProductNo:'9007199254740993'};
+  expect(decodeCatalogCursor(encodeCatalogCursor(cursor),'observed-desc')).toEqual(cursor);
+});
