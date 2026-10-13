@@ -76,7 +76,7 @@ function collectRowsForInsert(products) {
   const categoriesBySlug = new Map();
   const productCategoryKeys = new Set();
   const colorsById = new Map();
-  const productColorKeys = new Set();
+  const productColorsByKey = new Map();
 
   for (const product of products) {
     productsByNo.set(product.product.product_no, product.product);
@@ -94,15 +94,23 @@ function collectRowsForInsert(products) {
     }
 
     for (const color of product.colors) {
-      colorsById.set(color.color_id, color);
+      const previous = colorsById.get(color.color_id);
+      // Artifact-order last non-null metadata wins; missing fields never erase
+      // an observed value, including when another product shares the color.
+      colorsById.set(color.color_id, {
+        ...color,
+        color_name: color.color_name ?? previous?.color_name ?? null,
+        swatch_image_url: color.swatch_image_url ?? previous?.swatch_image_url ?? null,
+      });
     }
 
     for (const productColor of product.productColors) {
       const key = `${productColor.color_id}:${productColor.product_no}`;
-      if (!productColorKeys.has(key)) {
-        productColorKeys.add(key);
-        rows.productColors.push(productColor);
-      }
+      const previous = productColorsByKey.get(key);
+      productColorsByKey.set(key, {
+        ...productColor,
+        product_color_image_url: productColor.product_color_image_url ?? previous?.product_color_image_url ?? null,
+      });
     }
 
     rows.priceSnapshots.push(...product.priceSnapshots);
@@ -112,6 +120,7 @@ function collectRowsForInsert(products) {
   rows.products = Array.from(productsByNo.values());
   rows.categories = Array.from(categoriesBySlug.values());
   rows.colors = Array.from(colorsById.values());
+  rows.productColors = Array.from(productColorsByKey.values());
 
   return rows;
 }
