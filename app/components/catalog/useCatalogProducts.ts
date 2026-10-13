@@ -53,7 +53,8 @@ export function useCatalogProducts(filters: CatalogFiltersState) {
     let hasLoaded = false;
     setProducts([]);
     setTotal(null);
-    setSnapshot(null);
+    // Keep last-known freshness during a first-page reload so its notice does
+    // not disappear and shift the grid on every filter change.
     setNextCursor(null);
     setError(null);
     setIsLoading(true);
@@ -79,7 +80,6 @@ export function useCatalogProducts(filters: CatalogFiltersState) {
               hasLoaded = false;
               setProducts([]);
               setTotal(null);
-              setSnapshot(null);
               setNextCursor(null);
               setIsLoading(true);
               setIsLoadingMore(false);

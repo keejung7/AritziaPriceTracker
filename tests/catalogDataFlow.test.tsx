@@ -39,6 +39,17 @@ test('requests 24 products, appends unique product IDs with the opaque cursor, a
   expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
 });
 
+test('last-known stale status stays visible while filtered first-page requests settle', async () => {
+  fetcher.mockResolvedValueOnce(ok(page([first], null, 'stale')))
+    .mockImplementationOnce(() => new Promise(() => {}));
+  const { result, rerender } = renderHook(({ filters }) => useCatalogProducts(filters), { initialProps: { filters: defaultCatalogFilters } });
+  await waitFor(() => expect(result.current.snapshot?.status).toBe('stale'));
+  rerender({ filters: { ...defaultCatalogFilters, brand: 'Wilfred' } });
+  expect(result.current.products).toEqual([]);
+  expect(result.current.isLoading).toBe(true);
+  expect(result.current.snapshot?.status).toBe('stale');
+});
+
 test('expired cursor discards accumulated pages and refetches page one', async () => {
   let resolveFresh: (response: Response) => void;
   fetcher.mockResolvedValueOnce(ok(page([first], 'expired'))).mockResolvedValueOnce(failure('cursor_expired'))

@@ -24,6 +24,10 @@ test('returns bigint product and snapshot IDs and microsecond timestamps unchang
   expect(response.products[0].productNo).toBe(id);
   expect(response.products[0].trackingStartedAt).toBe(timestamp);
   expect(response.products[0].colors[0].scrapedDate).toBe(timestamp);
+  for (const record of [response.products[0], ...response.products[0].colors]) {
+    expect(record).not.toHaveProperty('availableSizeCount');
+    expect(record).not.toHaveProperty('totalSizeCount');
+  }
   expect(response.snapshot).toMatchObject({id,dataAsOf:timestamp,refreshedAt:timestamp});
   expect(decodeCatalogCursor(response.nextCursor,'observed-desc')).toMatchObject({snapshotId:id,lastProductNo:id,lastSortValue:timestamp});
 });

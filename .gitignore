@@ -11,3 +11,8 @@ view.html
 
 # secrets
 .env
+
+# Reproducible browser/refresh validation output (keep timestamped run logs)
+test-results/
+playwright-report/
+.validation-artifacts/

@@ -5,6 +5,11 @@ const DEFAULTS = Object.freeze({ historyDays: 90, statementTimeoutMs: 120000,
   warningRegressionRatio: 0.75, failureRegressionRatio: 0.50, retainedSnapshots: 2 });
 const AVAILABLE = "trim(product_status) ~* '^(In Stock|Only a Few Left|Available)$'";
 const SOLD_OUT = "trim(product_status) ~* '^(Sold Out|Unavailable)$'";
+// Raw scraper metadata stores fractions and may be absent/stale. Catalog values
+// are percentage points calculated from the same paired prices shown to readers.
+const DISCOUNT_PERCENT = `CASE WHEN p.original_price>0
+  AND COALESCE(p.sale_price,p.original_price)<=p.original_price
+  THEN round((1-COALESCE(p.sale_price,p.original_price)/p.original_price)*100) END`;
 // Choose the latest complete color observation before eligibility and price ranking.
 // Reuse the same daily series for chart points, all low labels, and validation.
 const DAILY_SERIES = `WITH daily_colors AS (
@@ -15,7 +20,8 @@ const DAILY_SERIES = `WITH daily_colors AS (
     AND s.color_id=p.color_id AND s.scraped_date=p.scraped_date)
   ORDER BY p.product_no,p.color_id,(p.scraped_date AT TIME ZONE 'UTC')::date,p.scraped_date DESC
 ), eligible_daily_colors AS (
-  SELECT p.*, COALESCE(p.sale_price,p.original_price) AS effective_price FROM daily_colors p
+  SELECT p.product_no,p.color_id,p.original_price,p.sale_price,p.scraped_date,p.observation_date,
+    ${DISCOUNT_PERCENT} AS sale_percent,COALESCE(p.sale_price,p.original_price) AS effective_price FROM daily_colors p
   WHERE COALESCE(p.sale_price,p.original_price) IS NOT NULL
     AND EXISTS (SELECT 1 FROM aritzia_products.stock_snapshots s WHERE s.product_no=p.product_no
       AND s.color_id=p.color_id AND s.scraped_date=p.scraped_date AND ${AVAILABLE})
@@ -50,6 +56,7 @@ async function refreshCatalogReadModel(pool, options = {}) {
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
     await client.query(`SET LOCAL statement_timeout = '${statementTimeoutMs}ms'`);
+    logger.info(`catalog settings statementTimeoutMs=${statementTimeoutMs} retainedSnapshots=${retainedSnapshots} historyDays=${historyDays}`);
     await client.query('SELECT pg_advisory_xact_lock(18436, 1)');
     const created = await run('create_snapshot', `INSERT INTO aritzia_products.catalog_snapshots (data_as_of)
       SELECT COALESCE(GREATEST((SELECT max(scraped_date) FROM aritzia_products.price_snapshots),
@@ -62,7 +69,7 @@ async function refreshCatalogReadModel(pool, options = {}) {
        sale_percent, available_sizes, availability_status, scraped_date,
        color_name, product_color_image_url, swatch_image_url)
       SELECT $1, p.product_no, p.color_id, p.original_price, p.sale_price,
-        COALESCE(p.sale_price, p.original_price), p.sale_percent, COALESCE(s.sizes, '{}'::text[]),
+        COALESCE(p.sale_price, p.original_price), ${DISCOUNT_PERCENT}, COALESCE(s.sizes, '{}'::text[]),
         CASE WHEN cardinality(s.sizes)>0 THEN 'available'
           WHEN s.total>0 AND s.all_sold_out THEN 'sold_out' ELSE 'unknown' END,
         p.scraped_date, c.color_name, pc.product_color_image_url, c.swatch_image_url
@@ -135,9 +142,10 @@ async function refreshCatalogReadModel(pool, options = {}) {
       UPDATE aritzia_products.catalog_snapshots SET status='inactive' WHERE status='active' RETURNING snapshot_id)
       UPDATE aritzia_products.catalog_snapshots SET status='active', activated_at=now()
       WHERE snapshot_id=$1 AND (SELECT count(*) FROM deactivate)>=0`, [snapshotId]);
-    await run('cleanup_snapshots', `DELETE FROM aritzia_products.catalog_snapshots WHERE status<>'active'
+    const cleanup = await run('cleanup_snapshots', `DELETE FROM aritzia_products.catalog_snapshots WHERE status<>'active'
       AND snapshot_id NOT IN (SELECT snapshot_id FROM aritzia_products.catalog_snapshots
         WHERE status IN ('inactive','failed') ORDER BY snapshot_id DESC LIMIT $1)`, [retainedSnapshots]);
+    logger.info(`catalog cleanup removedSnapshots=${cleanup.rowCount ?? 0} retainedNonActive=${retainedSnapshots}`);
     stage = 'commit';
     await client.query('COMMIT');
     const totalDurationMs = performance.now()-started;

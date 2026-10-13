@@ -25,9 +25,12 @@
     "refresh-catalog": "node db/refresh_catalog_read_model.js",
     "test": "jest --runInBand --watchman=false --testPathIgnorePatterns=\\.integration\\.test\\.js$ --passWithNoTests",
     "test:db": "jest --runInBand --watchman=false --testMatch='**/*.integration.test.js'",
-    "typecheck": "tsc -p tsconfig.test.json --noEmit"
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test:e2e": "playwright test",
+    "profile:catalog": "node scripts/diagnostics/profile_catalog_queries.js"
   },
   "devDependencies": {
+    "@playwright/test": "1.57.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",

@@ -24,6 +24,11 @@ have trimmed, case-insensitive `In Stock`, `Only a Few Left`, or `Available` sta
 All explicitly `Sold Out`/`Unavailable` sizes yield `sold_out`; absent, NULL, or
 unrecognized stock yields `unknown` unless another size is available.
 Current From price uses the lowest available color price, breaking ties by color ID.
+Catalog and derived-history discounts are percentage points calculated from paired
+original/effective prices, never copied from raw fractional `sale_percent` metadata.
+Missing/zero original prices and prices above original have unknown discount; equal
+positive original/effective prices have zero discount. Negative eligible prices still
+fail validation rather than being clamped. Raw observations remain unchanged.
 Sold-out and unknown colors/products remain visible with no eligible From price.
 
 `dataAsOf` is the latest price or stock observation. UTC calendar dates define the

@@ -69,6 +69,8 @@ function getProductDataForInsert() {
     const productName = product.product_name ? product.product_name : null;
     const productBrand = product.product_brand ? product.product_brand : null;
 
+    const categorySlugs = [...new Set((product.source_categories || [])
+      .filter(value => typeof value === 'string').map(value => value.trim()).filter(Boolean))];
     const productObj = {
       product: {
         product_no: productNo,
@@ -77,6 +79,8 @@ function getProductDataForInsert() {
         product_name: productName,
         product_brand: productBrand,
       },
+      categories: categorySlugs.map(category_slug => ({ category_slug })),
+      productCategories: categorySlugs.map(category_slug => ({ product_no: productNo, category_slug })),
       colors: [], // GATHER ARRAY
       productColors: [], // GATHER ARRAY
       priceSnapshots: [], // GATHER ARRAY
@@ -96,12 +100,14 @@ function getProductDataForInsert() {
       const colorName = colorDetails.color_text;
 
       // ADD COLORS DATA
-      productObj.colors.push({ color_id: colorId, color_name: colorName });
+      productObj.colors.push({ color_id: colorId, color_name: colorName,
+        swatch_image_url: colorDetails.swatch_image_url || null });
 
       // ADD PRODUCT_COLORS DATA
       productObj.productColors.push({
         product_no: productNo,
         color_id: colorId,
+        product_color_image_url: colorDetails.product_color_image_url || null,
       });
 
       // price data

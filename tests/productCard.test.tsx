@@ -4,7 +4,7 @@ import ProductCard from '../app/components/catalog/ProductCard';
 import type { CatalogColor, CatalogProduct } from '../app/services/catalogTypes';
 
 const color = (id: string, overrides: Partial<CatalogColor> = {}): CatalogColor => ({ colorId: id, colorName: id, swatchImageUrl: null, productColorImageUrl: `/${id}.jpg`, originalPrice: 100, salePrice: 70, effectivePrice: 70, salePercent: 30, availableSizes: ['S', 'M'], availabilityStatus: 'available', scrapedDate: '2026-10-13', ...overrides });
-const product: CatalogProduct = { productNo: '12345', productSlug: null, productUrl: null, productName: 'Everyday shirt', productBrand: 'Wilfred', categories: ['Tops'], fromColorId: 'Black', fromPrice: 70, fromOriginalPrice: 100, fromSalePercent: 30, selectedColorId: 'Black', availabilityStatus: 'available', trackingStartedAt: null, insightLabel: 'Lowest observed price', colors: [color('Black'), color('White', { effectivePrice: 100, salePrice: null, salePercent: 0, availableSizes: ['L'] }), color('Red', { availabilityStatus: 'sold_out', availableSizes: [] }), color('Blue', { availabilityStatus: 'unknown', availableSizes: [] })] };
+const product: CatalogProduct = { productNo: '12345', productSlug: null, productUrl: null, productName: 'Everyday shirt', productBrand: 'Wilfred', categories: ['Tops'], fromColorId: 'Black', fromPrice: 70, fromOriginalPrice: 100, fromSalePercent: 30, selectedColorId: 'Black', availabilityStatus: 'available', trackingStartedAt: null, insightLabel: 'Lowest ever', colors: [color('Black'), color('White', { effectivePrice: 100, salePrice: null, salePercent: 0, availableSizes: ['L'] }), color('Red', { availabilityStatus: 'sold_out', availableSizes: [] }), color('Blue', { availabilityStatus: 'unknown', availableSizes: [] })] };
 
 test('From stays paired and stable while keyboard color selection changes image, price and sizes', async () => {
   const user = userEvent.setup();
@@ -14,7 +14,7 @@ test('From stays paired and stable while keyboard color selection changes image,
   expect(from).toHaveTextContent('$100.00');
   expect(from).toHaveTextContent('30% off');
   expect(from).toHaveStyle({ fontVariantNumeric: 'tabular-nums' });
-  expect(screen.getAllByText('Lowest observed price')).toHaveLength(1);
+  expect(screen.getAllByText('Lowest ever')).toHaveLength(1);
   const white = screen.getByRole('button', { name: 'Select White' });
   white.focus();
   await user.keyboard('{Enter}');

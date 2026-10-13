@@ -2,7 +2,6 @@ const pg = require("pg");
 const dotenv = require("dotenv").config();
 const { Pool } = pg;
 
-const parser = require("./parser.js");
 const { refreshCatalogReadModel } = require("./catalogReadModel.js");
 const MAX_BATCH_PARAMS = 5000;
 
@@ -23,7 +22,7 @@ const pool = new Pool(
 
 // For each product, insert product information
 async function main() {
-  const products = parser.getProductDataForInsert();
+  const products = require("./parser.js").getProductDataForInsert();
   const rows = collectRowsForInsert(products);
 
   await saveParsedProducts(pool, rows);
@@ -32,10 +31,12 @@ async function main() {
   await pool.end();
 }
 
-main().catch((error) => {
+if (require.main === module) main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+
+module.exports = { collectRowsForInsert, saveParsedProducts };
 
 async function saveParsedProducts(pool, rows) {
   const client = await pool.connect();
@@ -44,6 +45,8 @@ async function saveParsedProducts(pool, rows) {
     await client.query("BEGIN");
 
     await insertOrUpdateProductTable(client, rows.products);
+    await insertCategoriesTable(client, rows.categories);
+    await insertProductCategoriesTable(client, rows.productCategories);
     await insertColorsTable(client, rows.colors);
     await insertProductColorsTable(client, rows.productColors);
     await insertPriceSnapshotsTable(client, rows.priceSnapshots);
@@ -61,6 +64,8 @@ async function saveParsedProducts(pool, rows) {
 function collectRowsForInsert(products) {
   const rows = {
     products: [],
+    categories: [],
+    productCategories: [],
     colors: [],
     productColors: [],
     priceSnapshots: [],
@@ -68,11 +73,25 @@ function collectRowsForInsert(products) {
   };
 
   const productsByNo = new Map();
+  const categoriesBySlug = new Map();
+  const productCategoryKeys = new Set();
   const colorsById = new Map();
   const productColorKeys = new Set();
 
   for (const product of products) {
     productsByNo.set(product.product.product_no, product.product);
+
+    for (const category of product.categories) {
+      categoriesBySlug.set(category.category_slug, category);
+    }
+
+    for (const productCategory of product.productCategories) {
+      const key = `${productCategory.product_no}:${productCategory.category_slug}`;
+      if (!productCategoryKeys.has(key)) {
+        productCategoryKeys.add(key);
+        rows.productCategories.push(productCategory);
+      }
+    }
 
     for (const color of product.colors) {
       colorsById.set(color.color_id, color);
@@ -91,6 +110,7 @@ function collectRowsForInsert(products) {
   }
 
   rows.products = Array.from(productsByNo.values());
+  rows.categories = Array.from(categoriesBySlug.values());
   rows.colors = Array.from(colorsById.values());
 
   return rows;
@@ -156,6 +176,60 @@ DO UPDATE SET
     await client.query(sql.replace("%VALUES%", placeholders), values);
   }
 }
+async function insertCategoriesTable(client, categories) {
+  if (categories.length === 0) return 0;
+
+  const sql = `
+    INSERT INTO aritzia_products.categories (
+      category_slug
+    )
+    VALUES %VALUES%
+    ON CONFLICT (category_slug)
+    DO NOTHING
+  `;
+
+  let affectedRows = 0;
+  for (const chunk of chunkRowsByParams(categories, 1)) {
+    const { placeholders, values } = buildValues(chunk, ["category_slug"]);
+
+    const result = await client.query(
+      sql.replace("%VALUES%", placeholders),
+      values,
+    );
+    affectedRows += result.rowCount ?? 0;
+  }
+  return affectedRows;
+}
+
+async function insertProductCategoriesTable(client, productCategories) {
+  if (productCategories.length === 0) return 0;
+
+  const sql = `
+    INSERT INTO aritzia_products.product_categories (
+      product_no,
+      category_slug
+    )
+    VALUES %VALUES%
+    ON CONFLICT (product_no, category_slug)
+    DO NOTHING
+  `;
+
+  let affectedRows = 0;
+  for (const chunk of chunkRowsByParams(productCategories, 2)) {
+    const { placeholders, values } = buildValues(chunk, [
+      "product_no",
+      "category_slug",
+    ]);
+
+    const result = await client.query(
+      sql.replace("%VALUES%", placeholders),
+      values,
+    );
+    affectedRows += result.rowCount ?? 0;
+  }
+  return affectedRows;
+}
+
 /* 
 Insert Color
 
@@ -167,22 +241,29 @@ async function insertColorsTable(client, colors) {
   if (colors.length === 0) return;
 
   const sql = `
-	   INSERT INTO aritzia_products.colors (
+	   INSERT INTO aritzia_products.colors AS colors (
 	    color_id,
-	    color_name
+	    color_name,
+      swatch_image_url
 	   )
 	  VALUES %VALUES%
 	  ON CONFLICT (color_id)
-	  DO NOTHING
+	  DO UPDATE SET
+      color_name = COALESCE(EXCLUDED.color_name, colors.color_name),
+      swatch_image_url = COALESCE(EXCLUDED.swatch_image_url, colors.swatch_image_url)
 	  `;
 
-  for (const chunk of chunkRowsByParams(colors, 2)) {
+  for (const chunk of chunkRowsByParams(colors, 3)) {
     const { placeholders, values } = buildValues(chunk, [
       "color_id",
       "color_name",
+      "swatch_image_url",
     ]);
 
-    await client.query(sql.replace("%VALUES%", placeholders), values);
+    await client.query(
+      sql.replace("%VALUES%", placeholders),
+      values,
+    );
   }
 }
 
@@ -197,22 +278,31 @@ async function insertProductColorsTable(client, productColors) {
   if (productColors.length === 0) return;
 
   const sql = `
-    INSERT INTO aritzia_products.product_colors (
+    INSERT INTO aritzia_products.product_colors AS product_colors (
      color_id,
-     product_no
+     product_no,
+     product_color_image_url
     )
      VALUES %VALUES%
      ON CONFLICT (color_id, product_no)
-     DO NOTHING
+     DO UPDATE SET
+      product_color_image_url = COALESCE(
+        EXCLUDED.product_color_image_url,
+        product_colors.product_color_image_url
+      )
   `;
 
-  for (const chunk of chunkRowsByParams(productColors, 2)) {
+  for (const chunk of chunkRowsByParams(productColors, 3)) {
     const { placeholders, values } = buildValues(chunk, [
       "color_id",
       "product_no",
+      "product_color_image_url",
     ]);
 
-    await client.query(sql.replace("%VALUES%", placeholders), values);
+    await client.query(
+      sql.replace("%VALUES%", placeholders),
+      values,
+    );
   }
 }
 

@@ -89,6 +89,29 @@ describe('atomic catalog derivation in an isolated schema', () => {
     expect(log).toContain('stage=derive_all_time_lows queryDurationMs=');
     expect(log).toContain('totalDurationMs=');
     expect(log).toContain('productCount=7 colorCount=10 historyCount=5');
+    expect(log).toContain('statementTimeoutMs=120000');
+    expect(log).toContain('cleanup removedSnapshots=0 retainedNonActive=2');
+  });
+  test('raw fractional percentages become paired factual percentage points, including discount filters', async () => {
+    await query(`UPDATE aritzia_products.price_snapshots SET original_price=100,sale_price=40,sale_percent=0.6 WHERE product_no=1 AND color_id='a'`);
+    const refreshed = await refreshCatalogReadModel(scopedPool, { logger: logger() });
+    const color = (await query(`SELECT sale_percent FROM aritzia_products.catalog_product_colors WHERE snapshot_id=$1 AND product_no=1 AND color_id='a'`, [refreshed.snapshotId])).rows[0];
+    expect(Number(color.sale_percent)).toBe(60);
+    const history = (await query(`SELECT sale_percent FROM aritzia_products.catalog_product_price_history WHERE snapshot_id=$1 AND product_no=1`, [refreshed.snapshotId])).rows;
+    expect(history.every(point => Number(point.sale_percent) === 60)).toBe(true);
+    const { buildCatalogQuery } = require('../db/catalogQueries');
+    const built = buildCatalogQuery({ limit: 24, sort: 'discount-desc', cursor: null, search: null, brand: null, category: null, color: 'a', sizes: [], minPrice: null, maxPrice: null, saleOnly: true, minDiscount: 20 });
+    const catalog = (await query(built.text, built.values)).rows[0];
+    expect(catalog.total).toBe(1);
+    expect(Number(catalog.products[0].from_sale_percent)).toBe(60);
+    expect((await query(`SELECT sale_percent FROM aritzia_products.price_snapshots WHERE product_no=1 AND color_id='a' LIMIT 1`)).rows[0].sale_percent).toBe('0.6');
+  });
+  test('paired discounts guard unknown or zero original prices and ignore contradictory raw metadata', async () => {
+    await query(`UPDATE aritzia_products.price_snapshots SET original_price=CASE color_id WHEN 'a' THEN NULL WHEN 'b' THEN 0 WHEN 'c' THEN 100 ELSE 100 END,
+      sale_price=CASE color_id WHEN 'a' THEN 20 WHEN 'b' THEN 0 WHEN 'c' THEN 120 ELSE NULL END,sale_percent=0.6 WHERE product_no=1`);
+    const refreshed = await refreshCatalogReadModel(scopedPool, { logger: logger() });
+    expect((await query(`SELECT color_id,sale_percent FROM aritzia_products.catalog_product_colors WHERE snapshot_id=$1 AND product_no=1 ORDER BY color_id`, [refreshed.snapshotId])).rows)
+      .toEqual([{ color_id: 'a', sale_percent: null }, { color_id: 'b', sale_percent: null }, { color_id: 'c', sale_percent: null }, { color_id: 'd', sale_percent: '0' }]);
   });
   test('failed activation preserves previous active snapshot and raw observations', async () => {
     const old = (await query(`SELECT snapshot_id FROM aritzia_products.catalog_snapshots WHERE status='active'`)).rows[0].snapshot_id;

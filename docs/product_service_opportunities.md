@@ -1,5 +1,31 @@
 # Product Service Opportunities
 
+## Current shipped boundary (catalog redesign)
+
+The active product is a factual price explorer: a paginated product catalog, same-color
+availability/price filters, selected-color swatches, and lazy product price/availability
+history. It has no scoring endpoint or computed deal, popularity, scarcity, demand, or
+buy/wait recommendations. The concepts below are research ideas, not shipped behavior.
+Migration 009 adds the snapshot read model and metadata; migration 010 retires the old
+score/stock-metric/latest-price tables. `/api/prices/latest` is removed.
+
+Catalog labels are exactly `Lowest ever`, `Lowest in 90 days`, or `Lowest in 30 days`,
+with one shown in that priority order. They describe observed eligible daily prices,
+not all retail prices. Product-wide minima require available stock at the same color
+and timestamp; selected-color history can include sold-out observations. Unknown stock
+remains unknown. Catalog DTOs expose size arrays, not inventory or size-count metrics.
+
+Raw data commits before atomic derived refresh. Failed refreshes preserve the previous
+snapshot, produce a stale notice, and can be retried with `npm run refresh-catalog`.
+Source categories and images require enriched artifacts or existing metadata: current
+scrapers do not emit those optional fields. See the README for API/cursor errors,
+migrations, DB_LOG_PATH logs, read-only profiling, and disposable-database E2E commands.
+
+Highcharts free use is limited to qualifying personal/educational non-commercial use;
+personal use is also non-professional. Any commercial/professional use requires license
+reevaluation and the applicable commercial license. See the
+[Highcharts EULA](https://shop.highcharts.com/license-eula).
+
 ## Context
 
 Aritzia already offers a polished shopping experience, including product pages, app shopping, saved items, closet-oriented features, and some stock notification flows. This project should avoid simply recreating the storefront. The stronger opportunity is to provide shopping intelligence that helps users decide whether, when, and why to buy.
