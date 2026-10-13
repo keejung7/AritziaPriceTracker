@@ -37,6 +37,7 @@ describe('atomic catalog derivation in an isolated schema', () => {
     for (const [i,status] of (statuses || []).entries()) await query(`INSERT INTO aritzia_products.stock_snapshots VALUES($1,$2,$3,$4,$5)`, [`size${i}`,color,product,status,date]);
   }
   beforeEach(async () => {
+    await query(`DROP TRIGGER IF EXISTS reject_activation ON aritzia_products.catalog_snapshots`);
     await query(`TRUNCATE aritzia_products.products, aritzia_products.colors,
       aritzia_products.categories, aritzia_products.catalog_snapshots RESTART IDENTITY CASCADE`);
     await observe(1,'a',50,'2026-10-13T12:00Z',[' In Stock ','Sold Out']);
@@ -94,6 +95,11 @@ describe('atomic catalog derivation in an isolated schema', () => {
     await query(`CREATE TRIGGER reject_activation BEFORE UPDATE ON aritzia_products.catalog_snapshots FOR EACH ROW EXECUTE FUNCTION ${schema}.reject_activation()`);
     await expect(refreshCatalogReadModel(scopedPool,{logger:logger()})).rejects.toThrow('activation rejected');
     expect((await query(`SELECT snapshot_id FROM aritzia_products.catalog_snapshots WHERE status='active'`)).rows).toEqual([{snapshot_id:old}]);
+    const failed = (await query(`SELECT snapshot_id,status,data_as_of,created_at FROM aritzia_products.catalog_snapshots WHERE status='failed'`)).rows;
+    expect(failed).toHaveLength(1);
+    expect(Number(failed[0].snapshot_id)).toBeGreaterThan(Number(old));
+    expect(failed[0].created_at).toBeInstanceOf(Date);
+    expect(failed[0].data_as_of.toISOString()).toBe('2026-10-13T12:00:00.000Z');
     expect(Number((await query(`SELECT count(*) FROM aritzia_products.price_snapshots`)).rows[0].count)).toBe(15);
     expect(fs.readFileSync(logPath,'utf8')).toContain('failed stage=activate_snapshot');
     await query(`DROP TRIGGER reject_activation ON aritzia_products.catalog_snapshots`);
@@ -111,5 +117,46 @@ describe('atomic catalog derivation in an isolated schema', () => {
     await query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,scraped_date) VALUES($1,1,'extra',now())`,[previous]);
     await refreshCatalogReadModel(scopedPool,{logger:logger(),warningRegressionRatio:0.95});
     expect(fs.readFileSync(logPath,'utf8')).toContain('warning color count regression: 11 -> 10');
+  });
+  test('latest complete intraday observation determines history and all low labels', async () => {
+    await observe(8,'a',10,'2026-10-13T09:00Z',['Available']);
+    await observe(8,'a',20,'2026-10-13T18:00Z',['Available']);
+    await observe(8,'a',5,'2026-10-13T19:00Z',[]);
+    await observe(9,'a',10,'2026-10-13T09:00Z',['Available']);
+    await observe(9,'a',20,'2026-10-13T18:00Z',['Sold Out']);
+    await observe(10,'a',10,'2026-06-01T09:00Z',['Available']);
+    await observe(10,'a',20,'2026-06-01T18:00Z',['Available']);
+    await observe(10,'a',20,'2026-10-13T18:00Z',['Available']);
+    await observe(11,'a',10,'2026-10-13T09:00Z',['Available']);
+    await observe(11,'a',20,'2026-10-13T18:00Z',['Coming Soon']);
+    await observe(12,'a',5,'2026-06-01T09:00Z',['Available']);
+    await observe(12,'a',10,'2026-09-01T09:00Z',['Available']);
+    await observe(12,'a',20,'2026-09-01T18:00Z',['Available']);
+    await observe(12,'a',20,'2026-10-13T18:00Z',['Available']);
+    await observe(13,'a',5,'2026-06-01T09:00Z',['Available']);
+    await observe(13,'a',10,'2026-09-01T09:00Z',['Available']);
+    await observe(13,'a',10,'2026-10-01T09:00Z',['Available']);
+    await observe(13,'a',20,'2026-10-01T18:00Z',['Available']);
+    await observe(13,'a',20,'2026-10-13T18:00Z',['Available']);
+    const next = await refreshCatalogReadModel(scopedPool,{logger:logger()});
+    expect((await query(`SELECT effective_price FROM aritzia_products.catalog_product_price_history WHERE snapshot_id=$1 AND product_no=8`,[next.snapshotId])).rows).toEqual([{effective_price:'20'}]);
+    expect((await query(`SELECT insight_label FROM aritzia_products.catalog_products WHERE snapshot_id=$1 AND product_no=10`,[next.snapshotId])).rows).toEqual([{insight_label:'Lowest ever'}]);
+    expect((await query(`SELECT * FROM aritzia_products.catalog_product_price_history WHERE snapshot_id=$1 AND product_no=9`,[next.snapshotId])).rows).toEqual([]);
+    expect((await query(`SELECT * FROM aritzia_products.catalog_product_price_history WHERE snapshot_id=$1 AND product_no=11`,[next.snapshotId])).rows).toEqual([]);
+    expect((await query(`SELECT insight_label FROM aritzia_products.catalog_products WHERE snapshot_id=$1 AND product_no IN (12,13) ORDER BY product_no`,[next.snapshotId])).rows).toEqual([{insight_label:'Lowest in 90 days'},{insight_label:'Lowest in 30 days'}]);
+  });
+  test.each([
+    ['current effective', '2026-10-13T18:00Z', -1, null],
+    ['current original', '2026-10-13T18:00Z', -1, 10],
+    ['history effective', '2026-09-01T18:00Z', -1, null],
+    ['all-time original', '2026-06-01T18:00Z', -1, 10],
+  ])('rejects negative %s prices without changing the active snapshot', async (_,date,original,sale) => {
+    const old = result.snapshotId;
+    await observe(8,'a',original,date,['Available']);
+    if (sale!==null) await query(`UPDATE aritzia_products.price_snapshots SET sale_price=$1 WHERE product_no=8`,[sale]);
+    await expect(refreshCatalogReadModel(scopedPool,{logger:logger()})).rejects.toThrow(/negative price/i);
+    expect((await query(`SELECT snapshot_id FROM aritzia_products.catalog_snapshots WHERE status='active'`)).rows).toEqual([{snapshot_id:old}]);
+    expect((await query(`SELECT status FROM aritzia_products.catalog_snapshots WHERE status='failed'`)).rows).toEqual([{status:'failed'}]);
+    expect((await query(`SELECT original_price FROM aritzia_products.price_snapshots WHERE product_no=8`)).rows).toEqual([{original_price:'-1'}]);
   });
 });
