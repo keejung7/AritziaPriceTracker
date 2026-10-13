@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Alert, Anchor, Box, Button, Group, Loader, Paper, Stack, Text, Title } from '@mantine/core';
 import type { ProductPriceHistory } from '../services/priceHistoryService';
-import { availableSizeCount, formatCAD, getAvailabilityPoints, getLowAnnotation, getPricePoints, latestObservation, type HistoryMode } from '../services/productChartService';
+import { availableSizeCount, formatCAD, getAvailabilityPoints, getLowAnnotation, getPricePoints, latestObservation, observationDiscount, type HistoryMode } from '../services/productChartService';
 
 const PriceHistoryChart = dynamic(() => import('./product/PriceHistoryChart'), { ssr: false, loading: () => <Text>Loading chart…</Text> });
 const AvailabilityHistoryChart = dynamic(() => import('./product/AvailabilityHistoryChart'), { ssr: false, loading: () => <Text>Loading chart…</Text> });
@@ -28,6 +28,8 @@ export default function ProductPriceHistoryExplorer({ productNo }: { productNo: 
   }, [productNo]);
   const selected = product?.colors.find(color => color.colorId === selectedColorId);
   const current = selected ? latestObservation(selected) : null;
+  const currentPrice = current?.salePrice ?? current?.originalPrice ?? null;
+  const discounted = currentPrice != null && current?.originalPrice != null && currentPrice < current.originalPrice;
   const points = useMemo(() => getPricePoints(product?.colors ?? [], selectedColorId, mode), [product, selectedColorId, mode]);
   const availability = useMemo(() => selected ? getAvailabilityPoints(selected) : [], [selected]);
   const low = getLowAnnotation(points);
@@ -43,7 +45,10 @@ export default function ProductPriceHistoryExplorer({ productNo }: { productNo: 
       </Box>
       <Stack style={{ flex: '1 1 320px' }} gap="lg">
         <Box><Text c="dimmed">{product.productBrand} · #{product.productNo}</Text><Title order={1}>{product.productName ?? `Product ${product.productNo}`}</Title></Box>
-        <Text aria-label="Selected color price" size="xl" fw={600} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatCAD(current?.salePrice ?? current?.originalPrice ?? null)}</Text>
+        <Group aria-label="Selected color price" gap="sm" style={{ fontVariantNumeric: 'tabular-nums' }}>
+          <Text size="xl" fw={600}>{formatCAD(currentPrice)}</Text>
+          {discounted ? <><Text component="del" c="dimmed">{formatCAD(current.originalPrice)}</Text><Text>{observationDiscount(current)}% off</Text></> : null}
+        </Group>
         <Text>{selected.colorName ?? selected.colorId}</Text>
         <Group aria-label="Product colors" gap="xs">
           {product.colors.map(color => <Button key={color.colorId} aria-label={`Select ${color.colorName ?? color.colorId}`} aria-pressed={color.colorId === selectedColorId} variant={color.colorId === selectedColorId ? 'filled' : 'outline'} onClick={() => setSelectedColorId(color.colorId)}>{color.swatchImageUrl ? <img src={color.swatchImageUrl} alt="" width={20} height={20} /> : null}{color.colorName ?? color.colorId}</Button>)}

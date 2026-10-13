@@ -14,6 +14,15 @@ export interface PricePoint {
 }
 const DAY = 86400000;
 export const formatCAD = (value: number | null) => value == null ? 'Unavailable' : `${new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(value)} CAD`;
+export const formatDiscount = (value: number | null) => value == null ? 'Unavailable' : `${value}%`;
+export function observationDiscount(point: ProductPrice | null): number | null {
+  if (!point) return null;
+  const effective = point.salePrice ?? point.originalPrice;
+  if (effective != null && point.originalPrice != null && point.originalPrice > 0 && effective < point.originalPrice) {
+    return Math.round((1 - effective / point.originalPrice) * 100);
+  }
+  return point.salePercent === 0 ? 0 : null;
+}
 export function latestObservation(color: ProductColorPriceHistory): ProductPrice | null {
   return [...color.history].sort((a, b) => Date.parse(b.scrapedDate) - Date.parse(a.scrapedDate))[0] ?? null;
 }
@@ -46,7 +55,7 @@ export function getPricePoints(colors: ProductColorPriceHistory[], selectedColor
     return { x: Date.parse(`${date}T00:00:00Z`), y: chosen?.price ?? null, date, observedAt: chosen?.observation.scrapedDate ?? null,
       colorId: chosen?.color.colorId ?? null, colorName: chosen ? chosen.color.colorName ?? chosen.color.colorId : null,
       effectivePrice: chosen?.price ?? null, regularPrice: regular,
-      discount: chosen && regular && regular > chosen.price ? Math.round((1 - chosen.price / regular) * 100) : null };
+      discount: observationDiscount(chosen?.observation ?? null) };
   });
 }
 export function getLowAnnotation(points: PricePoint[]): string | null {

@@ -1,5 +1,5 @@
 /** @jest-environment node */
-const { getPricePoints, getLowAnnotation, getAvailabilityPoints } = require('../app/services/productChartService');
+const { getPricePoints, getLowAnnotation, getAvailabilityPoints, formatDiscount } = require('../app/services/productChartService');
 const point = (date, price, stock = [{ size: 'S', isAvailable: true }]) => ({ scrapedDate: `${date}T10:00:00Z`, originalPrice: 100, salePrice: price, salePercent: null, stock });
 const colors = [
   { colorId: 'black', colorName: 'Black', history: [point('2026-10-01', 80), point('2026-10-03', 60, [])] },
@@ -25,4 +25,13 @@ test('availability distinguishes zero from unknown and preserves gaps', () => {
 test('null and unrecognized stock status cannot become a sold-out count', () => {
   const color = { ...colors[0], history: [point('2026-10-01', 80, [{ size: 'S', status: null, isAvailable: false }]), point('2026-10-02', 80, [{ size: 'S', status: 'Mystery', isAvailable: false }])] };
   expect(getAvailabilityPoints(color).map(p => p.y)).toEqual([null, null]);
+});
+test('unknown discount remains unavailable while explicit zero remains zero', () => {
+  const color = { ...colors[0], history: [
+    { ...point('2026-10-01', 80), originalPrice: null, salePercent: null },
+    { ...point('2026-10-02', 100), salePrice: null, salePercent: 0 },
+  ] };
+  expect(getPricePoints([color], 'black', 'selected').map(p => p.discount)).toEqual([null, 0]);
+  expect(formatDiscount(null)).toBe('Unavailable');
+  expect(formatDiscount(0)).toBe('0%');
 });
