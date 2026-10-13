@@ -239,6 +239,8 @@ One row per snapshot/product/color:
 
 Use a GIN index on `available_sizes` and B-tree indexes for effective price, discount, observation time, product/color identity, and other whitelisted sort/filter columns.
 
+Add a selective raw-stock index led by `(product_no, color_id, scraped_date)` and including `product_size` and `product_status` to support the exact-observation availability join. Confirm the final index shape with `EXPLAIN (ANALYZE, BUFFERS)` against realistic data. Do not add overlapping raw-table indexes without demonstrating a query-plan benefit, because every raw index increases ingestion cost.
+
 ### `catalog_products`
 
 One row per snapshot/product:
@@ -287,6 +289,18 @@ If any refresh or validation stage fails, roll back the new snapshot, log the st
 
 The first version performs a full rebuild after each daily load. The expected dataset of roughly 1,500 products does not justify incremental-refresh complexity. Incremental refresh is considered only after measurement.
 
+### Refresh performance safeguards
+
+- Restrict historical derivation to the required 90-day date window.
+- Apply a documented statement timeout to the read-model refresh. A timeout follows the same rollback, logging, and stale-snapshot behavior as any other refresh failure.
+- Record individual query durations and total refresh duration separately in the timestamped database log.
+- Compare derived product, color, and history counts with the previous successful snapshot. Warn on material regressions and fail validation on severe regressions using explicit thresholds established from the existing pipeline baseline.
+- Keep raw-table indexes selective and justify each new index with a measured query-plan improvement.
+- Introduce incremental refresh only if measured full-rebuild duration becomes material to the pipeline.
+- Acquire a PostgreSQL advisory lock for the refresh so two pipeline or refresh-only processes cannot build competing snapshots concurrently.
+- Build all derived rows without modifying the active snapshot, then keep the activation transaction limited to validation state changes and the active-snapshot pointer.
+- Retain only the active snapshot and the configured number of recent snapshots needed for cursor continuity. Remove older inactive snapshots after successful activation.
+
 ## Catalog API
 
 Introduce a product-centric endpoint while retaining the existing latest-price endpoint temporarily for compatibility:
@@ -313,6 +327,8 @@ Response envelope:
 
 Each item is one complete product with its current colors, sizes, selected/default state, and 90-day sparkline points.
 
+The catalog query first selects the page of product identifiers from `catalog_products`, then joins or aggregates colors and history only for those products. It must not expand all product/color/history rows before applying the product page limit. Responses include no more than 90 sparkline points per product and use normal HTTP response compression.
+
 ### Cursor pagination
 
 Use keyset pagination, not row offsets. The opaque cursor contains a version, snapshot identifier, sort identifier, last sort value, and last product number. Each whitelisted sort maps to an explicit SQL column, direction, and continuation predicate.
@@ -329,6 +345,8 @@ Retain the active and recent previous snapshots long enough for normal paging. A
 - Failed latest refresh with an older valid snapshot: serve it with `status: stale`
 - Never return raw database errors publicly
 - Never expose a partially built snapshot
+
+Profile every whitelisted sort/filter combination with realistic cardinalities. Record query plans for the default catalog request, combined color/size/price/sale filters, exact totals, and cursor continuation. Exact product totals remain in the first version because the expected catalog is small; revisit their cost only if measurement shows they materially affect response time.
 
 ## Retiring Scores and Old Metrics
 
@@ -369,6 +387,17 @@ Highcharts and SVG sparklines use the same charcoal, oxblood, and separator toke
 - Respect reduced-motion preferences.
 - Price reductions remain understandable without color through regular price, strikethrough, and percentage text.
 - Reserve image and chart dimensions to prevent layout shift.
+
+## UI Rendering Performance
+
+- Dynamically import and code-split Highcharts so it is loaded only on product-detail views and does not enter the catalog bundle.
+- Lazy-load product images while reserving their final dimensions.
+- Debounce search/filter requests and abort superseded network requests.
+- Memoize normalized sparkline points and SVG path generation. Each catalog sparkline renders one path with no per-point DOM nodes.
+- Request and mount 24 products at a time.
+- Apply `content-visibility: auto` or an equivalent off-screen rendering optimization to catalog cards after browser verification.
+- Monitor accumulated DOM size when users repeatedly select `Load more`. If realistic use produces unacceptable interaction or scrolling performance, introduce windowing or discard sufficiently old mounted pages while retaining pagination state.
+- Measure catalog JavaScript size, initial render, Core Web Vitals, filter-response latency, scrolling responsiveness, and memory with a realistic catalog result set on desktop and mobile viewports.
 
 ## Loading, Empty, and Incomplete States
 
