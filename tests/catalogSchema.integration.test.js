@@ -1,4 +1,6 @@
 const { createCatalogTestDatabase, validateTestDatabaseUrl } = require('./helpers/catalogTestDatabase');
+const { readFileSync } = require('node:fs');
+const path = require('node:path');
 
 describe('catalog test database safety', () => {
   test('refuses missing URLs and non-test databases before connecting', () => {
@@ -26,6 +28,28 @@ describe('catalog schema', () => {
     try { await expect(db.query(sql)).rejects.toMatchObject({ code }); }
     finally { await db.query('ROLLBACK TO SAVEPOINT expected_failure'); }
   }
+
+  test('upgrades the original raw schema with category relationships and image metadata idempotently', async () => {
+    await db.query("INSERT INTO categories (category_slug) VALUES ('tops')");
+    await db.query("INSERT INTO product_categories (product_no, category_slug) VALUES (1, 'tops')");
+    await db.query("UPDATE colors SET swatch_image_url = 'https://example.com/swatch' WHERE color_id = 'black'");
+    await db.query("UPDATE product_colors SET product_color_image_url = 'https://example.com/product' WHERE color_id = 'black'");
+    const migration = readFileSync(path.join(__dirname, '../db/migrations/009_add_catalog_read_model.sql'), 'utf8');
+    await db.query(migration.replace(/^BEGIN;|^COMMIT;/gm, ''));
+    const result = await db.query(`SELECT pc.product_no, pcat.category_slug,
+      c.swatch_image_url, pc.product_color_image_url
+      FROM product_colors pc JOIN colors c USING (color_id)
+      JOIN product_categories pcat USING (product_no)
+      WHERE pc.color_id = 'black'`);
+    expect(result.rows).toEqual([{
+      product_no: '1', category_slug: 'tops',
+      swatch_image_url: 'https://example.com/swatch',
+      product_color_image_url: 'https://example.com/product',
+    }]);
+    await rejectsSQL("INSERT INTO product_categories VALUES (1, 'tops')", '23505');
+    await rejectsSQL("INSERT INTO product_categories VALUES (999, 'tops')", '23503');
+    await rejectsSQL("INSERT INTO product_categories VALUES (1, 'missing')", '23503');
+  });
 
   test('creates one-active-snapshot enforcement and snapshot lifecycle columns', async () => {
     const result = await db.query("INSERT INTO catalog_snapshots (status, data_as_of) VALUES ('building', now()) RETURNING *");

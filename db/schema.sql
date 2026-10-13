@@ -9,14 +9,26 @@ CREATE TABLE products(
     product_brand text
 );
 
+CREATE TABLE categories(
+    category_slug text PRIMARY KEY
+);
+
+CREATE TABLE product_categories(
+    product_no bigint NOT NULL REFERENCES products (product_no),
+    category_slug text NOT NULL REFERENCES categories (category_slug),
+    PRIMARY KEY (product_no, category_slug)
+);
+
 CREATE TABLE colors(
     color_id text PRIMARY KEY,
-    color_name text
+    color_name text,
+    swatch_image_url text
 );
 
 CREATE TABLE product_colors(
     color_id text NOT NULL REFERENCES colors (color_id),
     product_no bigint NOT NULL REFERENCES products (product_no),
+    product_color_image_url text,
     PRIMARY KEY (color_id, product_no)
 );
 

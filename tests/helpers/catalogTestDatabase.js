@@ -27,8 +27,10 @@ async function createCatalogTestDatabase() {
     const result = await rawQuery('SELECT current_database() AS name');
     if (!result.rows[0].name.endsWith('_test')) throw new Error('Connected database must end in _test');
     await rawQuery('BEGIN');
-    const source = await readFile(path.join(__dirname, '../../db/schema.sql'), 'utf8');
-    await query(source.split('-- Catalog snapshot read model.')[0]);
+    // Bootstrap from a fixed pre-metadata raw schema, so canonical definitions
+    // and imported working-tree changes cannot conceal missing migrations.
+    const source = await readFile(path.join(__dirname, '../fixtures/originalRawSchema.sql'), 'utf8');
+    await query(source);
     const migration = await readFile(path.join(__dirname, '../../db/migrations/009_add_catalog_read_model.sql'), 'utf8');
     await query(migration.replace(/^BEGIN;|^COMMIT;/gm, ''));
     return {
