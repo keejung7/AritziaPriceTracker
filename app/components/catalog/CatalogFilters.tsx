@@ -54,7 +54,7 @@ export default function CatalogFilters({ filters, onChange }: {
     </Drawer>
   </>;
 
-  return <Stack>
+  return <Stack className="catalog-filters">
     <Group align="end">
       {primary}
       <Button variant="default" aria-expanded={opened} aria-controls="catalog-more-filters" onClick={() => setOpened(!opened)}>More filters</Button>
