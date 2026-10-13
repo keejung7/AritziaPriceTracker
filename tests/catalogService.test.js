@@ -21,13 +21,20 @@ test('returns bigint product and snapshot IDs and microsecond timestamps unchang
   const product={product_no:id,product_slug:null,product_full_url:null,product_name:'Large ID',product_brand:null,categories:[],from_color_id:null,from_price:null,from_original_price:null,from_sale_percent:null,selected_color_id:null,availability_status:'available',tracking_started_at:timestamp,insight_label:null,cursor_sort_value:timestamp,colors:[{color_id:'red',color_name:'Red',swatch_image_url:null,product_color_image_url:null,original_price:null,sale_price:null,effective_price:null,sale_percent:null,available_sizes:[],availability_status:'available',scraped_date:timestamp}]};
   const database={query:async()=>({rows:[{snapshot:{snapshot_id:id,data_as_of:timestamp,activated_at:timestamp,stale:false},products:[product],total:1,has_more:true}]})};
   const response=await getCatalogProducts(parse('sort=observed-desc'),database);
-  expect(response.products[0].productNo).toBe(id);
-  expect(response.products[0].trackingStartedAt).toBe(timestamp);
-  expect(response.products[0].colors[0].scrapedDate).toBe(timestamp);
-  for (const record of [response.products[0], ...response.products[0].colors]) {
+  expect(response.items[0].productNo).toBe(id);
+  expect(response.items[0].trackingStartedAt).toBe(timestamp);
+  expect(response.items[0].colors[0].scrapedDate).toBe(timestamp);
+  for (const record of [response.items[0], ...response.items[0].colors]) {
     expect(record).not.toHaveProperty('availableSizeCount');
     expect(record).not.toHaveProperty('totalSizeCount');
   }
-  expect(response.snapshot).toMatchObject({id,dataAsOf:timestamp,refreshedAt:timestamp});
+  expect(response.snapshot).toMatchObject({id,dataAsOf:timestamp,refreshedAt:timestamp,status:'current'});
+  expect(response).not.toHaveProperty('products');
   expect(decodeCatalogCursor(response.nextCursor,'observed-desc')).toMatchObject({snapshotId:id,lastProductNo:id,lastSortValue:timestamp});
+});
+test('returns deterministic human size ordering without narrowing metadata to current filters', async () => {
+  const database = {query: async()=>({rows:[{snapshot:{snapshot_id:'1',data_as_of:'2026-10-13T10:00:00.000000Z',activated_at:'2026-10-13T11:00:00.000000Z',stale:false},products:[],total:0,has_more:false,
+    filter_options:{colors:[{id:'1274',name:'Black'},{id:'3042',name:'Black'}],sizes:['10','2','ONE','M/L','3XS','00','XS/S','S','2XS','0','XS','M']}}]})};
+  const result = await getCatalogProducts(parse('search=nothing'),database);
+  expect(result.filterOptions).toEqual({colors:[{id:'1274',name:'Black'},{id:'3042',name:'Black'}],sizes:['3XS','2XS','XS','XS/S','S','M','M/L','00','0','2','10','ONE']});
 });

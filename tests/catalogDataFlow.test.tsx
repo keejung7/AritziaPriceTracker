@@ -10,8 +10,9 @@ const product = (id: string, name: string): CatalogProduct => ({
   fromColorId: null, fromPrice: 80, fromOriginalPrice: 100, fromSalePercent: 20, selectedColorId: null,
   availabilityStatus: 'available', trackingStartedAt: null, insightLabel: null, colors: [],
 });
-const page = (products: CatalogProduct[], nextCursor: string | null = null, status: 'active' | 'stale' = 'active'): CatalogResponse => ({
-  products, nextCursor, total: 30, snapshot: { id: '9007199254740993', dataAsOf: '2026-10-13T12:34:56.123456Z', refreshedAt: '2026-10-13T12:40:00.123456Z', status },
+const page = (items: CatalogProduct[], nextCursor: string | null = null, status: 'current' | 'stale' = 'current'): CatalogResponse => ({
+  items, nextCursor, total: 30, snapshot: { id: '9007199254740993', dataAsOf: '2026-10-13T12:34:56.123456Z', refreshedAt: '2026-10-13T12:40:00.123456Z', status },
+  filterOptions:{colors:[{id:'1274',name:'Black'}],sizes:['3XS','S','M','ONE']},
 });
 const ok = (body: CatalogResponse) => ({ ok: true, json: async () => body } as Response);
 const failure = (code: string) => ({ ok: false, json: async () => ({ error: { code, message: 'Request failed' } }) } as Response);
@@ -48,6 +49,21 @@ test('last-known stale status stays visible while filtered first-page requests s
   expect(result.current.products).toEqual([]);
   expect(result.current.isLoading).toBe(true);
   expect(result.current.snapshot?.status).toBe('stale');
+  expect(result.current.filterOptions).toEqual({colors:[{id:'1274',name:'Black'}],sizes:['3XS','S','M','ONE']});
+});
+test('shopper header exposes observation date and retains freshness through filter reloads', async () => {
+  fetcher.mockResolvedValueOnce(ok(page([first],null,'stale'))).mockImplementationOnce(()=>new Promise(()=>{}));
+  const user=userEvent.setup(); explorer();
+  await screen.findByText('First dress');
+  expect(screen.getByRole('heading',{name:'Aritzia Price Tracker',level:1})).toBeInTheDocument();
+  expect(screen.getByText(/Compare current prices, find your size/)).toBeInTheDocument();
+  const time=screen.getByText(/^Oct 13, 2026/);
+  const updated=time.parentElement!;
+  expect(updated).toHaveTextContent(/^Updated Oct 13, 2026/);
+  expect(time).toHaveAttribute('datetime','2026-10-13T12:34:56.123456Z');
+  expect(screen.getByText(/Catalog data is stale/)).toHaveTextContent('Oct 13, 2026');
+  await user.type(screen.getByLabelText('Brand'),'W');
+  expect(screen.getByText(/^Oct 13, 2026/).parentElement).toHaveTextContent(updated.textContent!);
 });
 
 test('expired cursor discards accumulated pages and refetches page one', async () => {
@@ -165,7 +181,8 @@ test('reset clears every control and fetches the default first page', async () =
   explorer();
   await screen.findByText('First dress');
   await user.click(screen.getByRole('button', { name: 'More filters' }));
-  for (const label of ['Search', 'Category', 'Brand', 'Color']) await user.type(screen.getByLabelText(label), 'test');
+  for (const label of ['Search', 'Category', 'Brand']) await user.type(screen.getByLabelText(label), 'test');
+  await user.selectOptions(screen.getByLabelText('Color'),'1274');
   for (const label of ['Minimum price', 'Maximum price']) await user.type(screen.getByLabelText(label), '50');
   await user.click(screen.getByLabelText('S', { exact: true }));
   await user.click(screen.getByLabelText('On sale'));

@@ -166,12 +166,17 @@ not invoke either scraper. `DB_LOG_PATH` is optional and appends timestamped DB 
 to the specified file as well as the terminal. Refresh messages include each named
 query duration, product/color/history counts, failure stage and total duration. Full
 pipeline run artifacts use `data/YYYY-MM-DD/product_links_<run-id>.csv`,
-`product_details_<run-id>.jsonl`, and, when configured by the runner,
+`product_details_<run-id>.jsonl`, and
 `db_load_<run-id>.log`. Preserve these timestamped artifacts when investigating a run.
+The runner forwards `DB_LOG_PATH` automatically. Loader logs identify input/run ID,
+prepared and affected raw counts, transaction/failure stage and stack, followed by
+catalog stages, counts, validation, activation and timings.
 Defaults are a 120,000 ms per-statement timeout, 90 history days, a warning below 75%
-of previous product/color counts, failure below 50%, and retention of the active
-snapshot plus the two newest inactive/failed snapshots. Failure markers are pruned by
-the next successful refresh. See `db/catalogReadModel.md` for the derivation rules.
+of previous product/color counts and comparable history counts, failure below 50%,
+and retention of the active snapshot plus the two newest inactive/failed snapshots.
+History compares only overlapping UTC dates so normal rolling-window expiry does
+not trigger a regression. A failure marker stays until it falls outside that retention
+set; the next success does not necessarily remove it. See `db/catalogReadModel.md`.
 
 The parser accepts optional `source_categories: string[]` on each raw product and
 `swatch_image_url` / `product_color_image_url` on each color. The loader persists these
@@ -180,14 +185,21 @@ URLs. The current checked-in scrapers still emit URL-only CSV and do not collect
 optional category/image metadata. Enrich raw artifacts or populate metadata before
 expecting category matches or product images; older artifacts remain valid.
 
-`GET /api/catalog/products` returns one product per card, all its current colors, an
+`GET /api/catalog/products` returns `{ items, total, nextCursor, snapshot, filterOptions }`.
+Each `items` entry contains one product and all its current colors. There is an
 exact filtered `total`, `nextCursor` (or null), and `snapshot` with `id`, `dataAsOf`,
-`refreshedAt`, and `status` (`active` or `stale`). Product and snapshot IDs are decimal
+`refreshedAt`, and `status` (`current` or `stale`). Product and snapshot IDs are decimal
 strings, including values above JavaScript's safe integer range. Catalog timestamps
 are UTC ISO strings preserving PostgreSQL microseconds. Prices are numeric CAD values,
 nullable when unknown. Colors expose `availableSizes` and `availabilityStatus`
 (`available`, `sold_out`, `unknown`); the catalog omits `availableSizeCount`,
 `totalSizeCount`, scores, and full price histories.
+`filterOptions` contains catalog-wide `colors: [{ id, name }]` and observed `sizes`
+from that same resolved snapshot, independent of filters/page limits. The UI selects
+color IDs by shopper name, appending IDs to repeated names. Repeated IDs choose the
+first nonblank name in C ordering (or the ID). Sizes retain exact labels, ordered by
+alpha fit, numeric fit, one-size and other labels; combined sizes are included.
+Cursor pages retain their original options; first pages adopt the active snapshot.
 
 | Parameter | Meaning |
 | --- | --- |
@@ -204,7 +216,7 @@ nullable when unknown. Colors expose `availableSizes` and `availabilityStatus`
 
 Color, size, sale, discount and price predicates must all match the **same available
 color**. A black full-price color cannot combine with a red sale color to match
-`color=black&saleOnly=true`. Changing filters starts a fresh first page. Global
+`color=1274&saleOnly=true`. Changing filters starts a fresh first page. Global
 `From` metadata stays paired with the cheapest available color; a filtered card can
 select a different matching color and show its own price/sizes. Swatches change the
 selected color, not the global `From` price. Default sorting ranks discount descending,
@@ -221,17 +233,32 @@ timestamp age alone does not set that flag. `/api/prices/latest` is removed (404
 Only one catalog price insight is shown, with exact priority/labels: `Lowest ever`,
 `Lowest in 90 days`, then `Lowest in 30 days`. These compare eligible daily observations,
 not a complete retail price record. Product detail defaults to the selected color's
-daily observed price, including sold-out prices. `Product lowest available` chooses
-the daily cheapest color with an available size at the exact observation timestamp.
+eligible daily price. `Product lowest available` chooses the daily cheapest eligible
+color. Both first select the latest complete price/stock observation per color/UTC
+day, then require an available size at that exact timestamp. A later complete sold-out
+observation supersedes an earlier available one; an incomplete later price does not.
+Sold-out/unknown prices never contribute to either view's low labels. Window labels
+require a full tracked 30-/90-day span and use the same exact priority as cards.
 Missing days remain gaps; unknown stock is not zero. Detail tooltips show CAD price,
 regular price, discount, color and observation date; availability charts count sizes,
-not inventory units.
+not inventory units. An explicitly available size makes the count known even when
+other statuses are null/unrecognized; zero requires every status to prove sold out.
+The API supplies authoritative `chartHistory.product` and `chartHistory.colors[colorId]`
+points, gaps, low annotations and availability, retaining raw color history and SQL
+microseconds in observation identities.
 
 Catalog and derived-history discount percentages use paired original/effective prices
 in percentage points (`100 → 40` is `60% off`), regardless of raw fractional metadata.
 Unknown or zero original prices leave the discount unknown; negative eligible prices
 reject the refresh. Last-known snapshot freshness stays visible while filters reload,
-preventing a stale notice from repeatedly moving the product grid.
+preventing a stale notice from repeatedly moving the product grid. The header's
+human-readable `Updated` value and stale notice identify the observation date.
+Grids use one column on mobile, two on tablet, three/four on desktop; mobile drawers
+fill the viewport. Charts reserve 340/260 px during loading and insufficient history.
+Cards use `content-visibility: auto` with remembered 680 px intrinsic sizing, verified
+for offscreen keyboard focus and overflow in Chromium. Unsupported browsers render
+normally. Pure shared tokens provide Avenir Next/Helvetica Neue fonts and chart/UI
+separator colors without loading Highcharts in the catalog.
 
 Highcharts is proprietary. Free-license eligibility is limited to qualifying personal
 or educational **non-commercial** use. Personal use must also be non-professional;

@@ -48,7 +48,7 @@ export interface RawPriceHistoryRow {
 }
 
 export interface PriceRow {
-  productNo: number;
+  productNo: string;
   productUrl: string;
   productName: string | null;
   productBrand: string | null;
@@ -118,7 +118,7 @@ export function formatProductPriceForDate(
 
 function formatPriceRow(row: RawPriceHistoryRow): PriceRow {
   return {
-    productNo: Number(row.product_no),
+    productNo: String(row.product_no),
     productUrl: row.product_full_url,
     productName: row.product_name,
     productBrand: row.product_brand,
@@ -136,7 +136,7 @@ function toNumberOrNull(value: unknown): number | null {
 }
 
 function toIsoString(value: Date | string): string {
-  return new Date(value).toISOString();
+  return typeof value === 'string' ? value : value.toISOString();
 }
 
 function normalizeCategories(categories: string[] | null): string[] {

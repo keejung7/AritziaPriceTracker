@@ -38,10 +38,12 @@ const outputDir = path.join(__dirname, "data", runDate);
 
 const linksPath = path.join(outputDir, `product_links_${runId}.csv`);
 const detailsPath = path.join(outputDir, `product_details_${runId}.jsonl`);
+const dbLogPath = path.join(outputDir, `db_load_${runId}.log`);
 
 const runEnv = {
   PRODUCT_LINKS_PATH: linksPath,
   PRODUCT_DETAILS_PATH: detailsPath,
+  DB_LOG_PATH: dbLogPath,
 };
 
 // Run scripts in sequence

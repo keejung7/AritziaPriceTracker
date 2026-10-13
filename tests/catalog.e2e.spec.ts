@@ -44,11 +44,11 @@ test('catalog loads exact labels, default discount order, unique pages, and sold
 test('combined filters match the same color and selected sizes use OR', async ({ page }) => {
   await openFilters(page, true);
   await change(page, () => page.getByLabel('On sale', { exact: true }).check(), 'saleOnly', 'true');
-  await change(page, () => page.getByLabel('Color', { exact: true }).fill('black'), 'color', 'black');
+  await change(page, () => page.getByLabel('Color', { exact: true }).selectOption('1274'), 'color', '1274');
   await closeFilters(page);
   await expect(page.getByText('No products match your filters.')).toBeVisible();
   await openFilters(page);
-  await change(page, () => page.getByLabel('Color', { exact: true }).fill(''), 'color', null);
+  await change(page, () => page.getByLabel('Color', { exact: true }).selectOption(''), 'color', null);
   await change(page, () => page.getByLabel('S', { exact: true }).check(), 'size', 'S');
   await closeFilters(page);
   await expect(page.getByRole('status')).toHaveText('0 products');
@@ -87,13 +87,81 @@ test('swatches update selected price and available sizes while From stays stable
 });
 
 test('empty search can clear filters and failed refresh exposes stale snapshot notice', async ({ page }) => {
-  await expect(page.getByText('Catalog data is stale. Showing the latest available snapshot.')).toBeVisible();
+  await expect(page.getByText(/Catalog data is stale. Showing observations from Oct 13, 2026/)).toBeVisible();
   await openFilters(page);
   await change(page, () => page.getByLabel('Search', { exact: true }).fill('no such product'), 'search', 'no such product');
   await closeFilters(page);
   await expect(page.getByText('No products match your filters.')).toBeVisible();
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   await expect(page.getByRole('status')).toHaveText('120 products');
+});
+test('catalog metadata offers named IDs and all observed size families after an empty result', async ({page}) => {
+  await openFilters(page,true);
+  await expect(page.getByLabel('Color',{exact:true}).getByRole('option')).toHaveText(['All colors','Black','Red']);
+  const size=page.getByRole('group',{name:'Size',exact:true});
+  expect(await size.getByRole('checkbox').evaluateAll(inputs=>inputs.map(input=>input.getAttribute('value')))).toEqual(['3XS','XS/S','S','M','M/L','2','2/4','10','ONE']);
+  await change(page,()=>page.getByLabel('ONE',{exact:true}).check(),'size','ONE');
+  await closeFilters(page);
+  await expect(page.getByRole('status')).toHaveText('1 products');
+  await openFilters(page);
+  await change(page,()=>page.getByLabel('Search',{exact:true}).fill('absent'),'search','absent');
+  await expect(page.getByLabel('Color',{exact:true}).getByRole('option',{name:'Red',exact:true})).toHaveAttribute('value','18891');
+  await expect(page.getByLabel('3XS',{exact:true})).toBeVisible();
+});
+test('responsive grid, full-width drawer, shared theme and offscreen focus preserve geometry', async ({page},testInfo) => {
+  test.skip(testInfo.project.name!=='desktop','One project checks all four viewport geometries.');
+  for (const [width,columns] of [[320,1],[600,1],[834,2],[1080,3],[1440,4]]) {
+    await page.setViewportSize({width,height:1000});
+    const geometry=await cards(page).evaluateAll(nodes=>nodes.slice(0,4).map(node=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};}));
+    expect(geometry.filter(card=>Math.abs(card.y-geometry[0].y)<1)).toHaveLength(columns);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    if(width<768){
+      await openFilters(page);
+      const dialog=page.getByRole('dialog',{name:'Filters',exact:true});
+      await expect.poll(async()=> (await dialog.boundingBox())!.x).toBeCloseTo(0,0);
+      const drawer=await dialog.boundingBox();
+      expect(drawer!.x).toBeCloseTo(0,0);expect(drawer!.width).toBeCloseTo(width,0);
+      await closeFilters(page);
+    }
+  }
+  const theme=await cards(page).first().evaluate(node=>({font:getComputedStyle(node).fontFamily,visibility:getComputedStyle(node).contentVisibility,intrinsic:getComputedStyle(node).containIntrinsicSize}));
+  expect(theme.font).toContain('Avenir Next');expect(theme.font).toContain('Helvetica Neue');
+  expect(theme.visibility).toBe('auto');expect(theme.intrinsic).toMatch(/auto.*\d+px/);
+  for(let count=48;count<=120;count+=24){await page.getByRole('button',{name:'Load more',exact:true}).click();await expect(cards(page)).toHaveCount(count);}
+  const last=cards(page).last().getByRole('link');await last.focus();await expect(last).toBeFocused();
+  const focused=await last.boundingBox();expect(focused!.y).toBeGreaterThanOrEqual(0);expect(focused!.y+focused!.height).toBeLessThanOrEqual(1000);
+  await expect(cards(page).last()).toContainText('Currently unavailable');
+  await page.keyboard.press('Tab');await expect(cards(page).last().getByRole('button').first()).toBeFocused();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
+});
+test('chart areas keep reserved height during lazy loading and insufficient history', async ({page}) => {
+  let release:()=>void=()=>{};
+  const blocked=new Promise<void>(resolve=>{release=resolve;});
+  await page.route('**/_next/static/chunks/*.js',async route=>{
+    const source=readFileSync(path.resolve('.next',new URL(route.request().url()).pathname.replace('/_next/','')),'utf8');
+    if(source.includes('highcharts-container')) await blocked;
+    await route.continue();
+  });
+  await page.goto('/products/1');
+  const price=page.getByRole('region',{name:'Price history chart',exact:true}), availability=page.getByRole('region',{name:'Availability history chart',exact:true});
+  await expect(page.getByText('Loading chart…').first()).toBeVisible();
+  expect((await price.boundingBox())!.height).toBeGreaterThanOrEqual(340);
+  expect((await availability.boundingBox())!.height).toBeGreaterThanOrEqual(260);
+  release();await expect(price.locator('.highcharts-container')).toBeVisible();
+  const chartFont=await price.locator('svg').first().evaluate(node=>getComputedStyle(node).fontFamily);
+  expect(chartFont).toContain('Avenir Next');
+  await expect(price.locator('.highcharts-xaxis .highcharts-axis-line')).toHaveAttribute('stroke','#DDD5CB');
+  await page.unroute('**/_next/static/chunks/*.js');
+  await page.route('**/api/products/1/price-history',async route=>{
+    const response=await route.fetch();const body=await response.json();
+    body.chartHistory.product.points=body.chartHistory.product.points.slice(-1);
+    for(const color of Object.values(body.chartHistory.colors) as any[]){color.price.points=color.price.points.slice(-1);color.availability=color.availability.slice(-1);}
+    await route.fulfill({response,json:body});
+  });
+  await page.reload();
+  await expect(page.getByText('Price history is still building',{exact:true})).toBeVisible();
+  expect((await price.boundingBox())!.height).toBeGreaterThanOrEqual(340);
+  expect((await availability.boundingBox())!.height).toBeGreaterThanOrEqual(260);
 });
 
 test('detail loads selected-color Highcharts and product-wide lowest-available mode', async ({ page }) => {

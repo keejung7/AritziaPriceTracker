@@ -4,15 +4,21 @@ import { useState } from 'react';
 import { Button, Checkbox, Drawer, Group, NativeSelect, SimpleGrid, Stack, TextInput } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { defaultCatalogFilters, type CatalogFiltersState } from './useCatalogProducts';
+import type { CatalogFilterOptions } from '../../services/catalogTypes';
 
-export default function CatalogFilters({ filters, onChange }: {
+export default function CatalogFilters({ filters, onChange, options }: {
   filters: CatalogFiltersState;
   onChange: (filters: CatalogFiltersState) => void;
+  options: CatalogFilterOptions;
 }) {
   const mobile = useMediaQuery('(max-width: 48em)', false);
   const [opened, setOpened] = useState(false);
   const change = <K extends keyof CatalogFiltersState>(key: K, value: CatalogFiltersState[K]) =>
     onChange({ ...filters, [key]: value });
+  const colorOptions = options.colors.map(color => ({ value: color.id,
+    label: options.colors.filter(other => other.name.toLowerCase() === color.name.toLowerCase()).length > 1 ? `${color.name} (${color.id})` : color.name }));
+  if (filters.color && !colorOptions.some(color => color.value === filters.color)) colorOptions.push({value:filters.color,label:`${filters.color} (not in this snapshot)`});
+  const sizes = [...new Set([...options.sizes, ...filters.sizes])];
 
   const primary = <>
     <TextInput label="Search" placeholder="Search products" value={filters.search} onChange={event => change('search', event.currentTarget.value)} />
@@ -28,12 +34,12 @@ export default function CatalogFilters({ filters, onChange }: {
     ]} />
   </>;
   const advanced = <Stack gap="md">
-    <TextInput label="Color" placeholder="All colors" value={filters.color} onChange={event => change('color', event.currentTarget.value)} />
+    <NativeSelect label="Color" value={filters.color} onChange={event => change('color', event.currentTarget.value)} data={[{value:'',label:'All colors'},...colorOptions]} />
     <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
       <legend>Size</legend>
       <Group gap="sm">
-        {['2XS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '00', '0', '2', '4', '6', '8', '10', '12', '14', '16'].map(size =>
-          <Checkbox key={size} label={size} checked={filters.sizes.includes(size)} onChange={event => change('sizes', event.currentTarget.checked ? [...filters.sizes, size] : filters.sizes.filter(value => value !== size))} />)}
+        {sizes.map(size =>
+          <Checkbox key={size} label={size} value={size} checked={filters.sizes.includes(size)} onChange={event => change('sizes', event.currentTarget.checked ? [...filters.sizes, size] : filters.sizes.filter(value => value !== size))} />)}
       </Group>
     </fieldset>
     <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
@@ -49,7 +55,7 @@ export default function CatalogFilters({ filters, onChange }: {
 
   if (mobile) return <>
     <Button onClick={() => setOpened(true)}>Filters</Button>
-    <Drawer opened={opened} onClose={() => setOpened(false)} title="Filters" position="right">
+    <Drawer opened={opened} onClose={() => setOpened(false)} title="Filters" position="right" size="100%">
       <Stack>{primary}{advanced}{reset}<Button onClick={() => setOpened(false)}>Show products</Button></Stack>
     </Drawer>
   </>;

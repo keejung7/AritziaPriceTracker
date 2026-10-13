@@ -1,7 +1,7 @@
 /** @jest-environment node */
 const { refreshCatalogReadModel } = require('../db/catalogReadModel');
 
-function fixture({ failStage, failMarker = false, previous = 10, current = 10 } = {}) {
+function fixture({ failStage, failMarker = false, previous = 10, current = 10, previousHistory = 10, comparableHistory = 10 } = {}) {
   const queries = [];
   const logger = { info: jest.fn(), error: jest.fn(), warn: jest.fn() };
   const client = {
@@ -11,7 +11,7 @@ function fixture({ failStage, failMarker = false, previous = 10, current = 10 } 
       if (failMarker && sql.includes('/* record_failure */')) throw new Error('marker persistence failed');
       if (failStage && sql.includes(`/* ${failStage} */`)) throw new Error('injected failure');
       if (sql.includes('/* create_snapshot */')) return { rows: [{ snapshot_id: '2', data_as_of: new Date('2026-10-13') }] };
-      if (sql.includes('/* validate_counts */')) return { rows: [{ product_count: current, color_count: current, history_count: current, previous_product_count: previous, previous_color_count: previous }] };
+      if (sql.includes('/* validate_counts */')) return { rows: [{ product_count: current, color_count: current, history_count: current, previous_product_count: previous, previous_color_count: previous, previous_comparable_history_count:previousHistory, comparable_history_count:comparableHistory }] };
       return { rows: [], rowCount: current };
     },
   };
@@ -29,6 +29,19 @@ test('locks and applies timeout within transaction, validates before publication
   expect(result).toMatchObject({ snapshotId: '2', productCount: 10, colorCount: 10, historyCount: 10 });
   expect(Object.keys(result.queryDurationsMs)).toHaveLength(8);
   expect(result.totalDurationMs).toBeGreaterThanOrEqual(0);
+});
+test('history loss in the overlapping rolling window prevents publication independently of product counts', async () => {
+  const f=fixture({previousHistory:10,comparableHistory:2});
+  await expect(refreshCatalogReadModel(f.pool,{logger:f.logger})).rejects.toThrow('Severe history count regression: 10 -> 2');
+  expect(f.queries.some(q=>q.includes('activate_snapshot'))).toBe(false);
+});
+test('warning history loss logs while normal window expiry has no comparable baseline', async () => {
+  const warning=fixture({previousHistory:10,comparableHistory:7});
+  await refreshCatalogReadModel(warning.pool,{logger:warning.logger});
+  expect(warning.logger.warn.mock.calls.flat().join(' ')).toContain('history count regression: 10 -> 7');
+  const expired=fixture({previousHistory:0,comparableHistory:0});
+  await refreshCatalogReadModel(expired.pool,{logger:expired.logger});
+  expect(expired.logger.warn).not.toHaveBeenCalled();
 });
 
 test('a derivation failure rolls back before publication and records the failed stage', async () => {

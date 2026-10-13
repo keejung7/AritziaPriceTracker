@@ -1,2 +1,2 @@
-// Pure constants keep the lazy chart chunks independent of the catalog shell.
-export const chartTheme = { ink: '#2B2825', axis: '#D9D3CA', grid: '#E8E2D9', accent: '#722F3D' } as const;
+import { editorialTokens as tokens } from '../../designTokens';
+export const chartTheme = { ink: tokens.ink, axis: tokens.separator, grid: tokens.separator, accent: tokens.accent, fontFamily:tokens.fontFamily } as const;

@@ -92,6 +92,19 @@ describe('atomic catalog derivation in an isolated schema', () => {
     expect(log).toContain('statementTimeoutMs=120000');
     expect(log).toContain('cleanup removedSnapshots=0 retainedNonActive=2');
   });
+  test('rolling history expiry is allowed but loss within the comparable window fails', async () => {
+    await observe(1,'a',50,'2026-10-11T12:00Z',['In Stock']);
+    await observe(1,'a',50,'2026-10-12T12:00Z',['In Stock']);
+    const baseline=await refreshCatalogReadModel(scopedPool,{logger:logger()});
+    expect(baseline.historyCount).toBe(7);
+    await query("UPDATE aritzia_products.stock_snapshots SET product_status='Sold Out' WHERE scraped_date IN ('2026-10-11T12:00Z','2026-10-12T12:00Z')");
+    await expect(refreshCatalogReadModel(scopedPool,{logger:logger(),warningRegressionRatio:0.9,failureRegressionRatio:0.8})).rejects.toThrow('Severe history count regression: 7 -> 5');
+    expect((await query("SELECT snapshot_id::text AS id FROM aritzia_products.catalog_snapshots WHERE status='active'")).rows[0].id).toBe(baseline.snapshotId);
+    await observe(1,'a',50,'2027-02-01T12:00Z',['In Stock']);
+    const advanced=await refreshCatalogReadModel(scopedPool,{logger:logger()});
+    expect(advanced.historyCount).toBe(1);
+    expect((await query("SELECT snapshot_id::text AS id FROM aritzia_products.catalog_snapshots WHERE status='active'")).rows[0].id).toBe(advanced.snapshotId);
+  });
   test('raw fractional percentages become paired factual percentage points, including discount filters', async () => {
     await query(`UPDATE aritzia_products.price_snapshots SET original_price=100,sale_price=40,sale_percent=0.6 WHERE product_no=1 AND color_id='a'`);
     const refreshed = await refreshCatalogReadModel(scopedPool, { logger: logger() });

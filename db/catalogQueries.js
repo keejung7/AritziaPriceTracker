@@ -59,6 +59,10 @@ function buildCatalogQuery(q) {
       SELECT cs.*, EXISTS(SELECT 1 FROM aritzia_products.catalog_snapshots failed WHERE failed.status='failed' AND failed.snapshot_id>cs.snapshot_id) AS stale
       FROM aritzia_products.catalog_snapshots cs
       WHERE ((${snapshotId}::bigint IS NULL AND cs.status='active') OR (cs.snapshot_id=${snapshotId}::bigint AND cs.status IN ('active','inactive')))
+    ), option_colors AS (
+      SELECT c.color_id AS id,COALESCE(min(NULLIF(trim(c.color_name),'') COLLATE "C"),c.color_id) AS name
+      FROM snapshot s JOIN aritzia_products.catalog_product_colors c USING(snapshot_id)
+      GROUP BY c.color_id
     ), eligible AS MATERIALIZED (
       SELECT p.*,r.color_id AS selected_color_id,${sort.expression} AS sort_value,
         CASE WHEN p.availability_status='available' THEN 0 ELSE 1 END AS unavailable
@@ -74,6 +78,9 @@ function buildCatalogQuery(q) {
     )
     SELECT (SELECT jsonb_build_object('snapshot_id',snapshot_id::text,'data_as_of',${utc('data_as_of')},
       'activated_at',${utc('activated_at')},'stale',stale) FROM snapshot) AS snapshot,
+      jsonb_build_object('colors',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.name COLLATE "C",c.id COLLATE "C") FROM option_colors c),'[]'::jsonb),
+        'sizes',COALESCE((SELECT jsonb_agg(size ORDER BY size) FROM (SELECT DISTINCT unnest(c.available_sizes) AS size
+          FROM snapshot s JOIN aritzia_products.catalog_product_colors c USING(snapshot_id)) sizes),'[]'::jsonb)) AS filter_options,
       (SELECT count(*)::int FROM eligible) AS total,
       (SELECT count(*)>${limit}::int FROM page) AS has_more,
       COALESCE((SELECT jsonb_agg(to_jsonb(items) || jsonb_build_object('product_no',items.product_no::text,

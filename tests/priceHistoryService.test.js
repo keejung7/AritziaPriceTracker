@@ -19,9 +19,9 @@ describe("priceHistoryService", () => {
       available_size_count: 1, total_size_count: 2, stock_metrics_computed_at: '2026-10-13T12:00:00Z' };
     const expectedStock = [{ size: 'S', status: 'In Stock', isAvailable: true }];
     expect(formatProductPriceForDate([row])).toMatchObject([{
-      productNo: 123456, productUrl: product.product_full_url, productName: 'Test Product',
+      productNo: '123456', productUrl: product.product_full_url, productName: 'Test Product',
       productBrand: 'Aritzia', colorId: 'black', colorName: 'Black',
-      originalPrice: 100, salePrice: 75, salePercent: 0.25, scrapedDate: '2026-10-13T12:00:00.000Z',
+      originalPrice: 100, salePrice: 75, salePercent: 0.25, scrapedDate: '2026-10-13T12:00:00Z',
     }]);
     for (const payload of [formatProductPriceForDate([row]), formatProductPriceHistory([row])]) {
       expect(JSON.stringify(payload)).not.toMatch(/deal.?quality.?score|deal.?score|scarcity.?score|popularity.?score|stock.?metrics|score.?version/i);
@@ -56,8 +56,13 @@ describe("priceHistoryService", () => {
       { ...product, color_id: "18891", color_name: "BROWN", original_price: "80", sale_price: "60", sale_percent: "0.25", scraped_date: new Date("2026-06-03T10:00:00.000Z") },
       { ...product, color_id: "1274", color_name: "BLACK", original_price: null, sale_price: null, sale_percent: null, scraped_date: "2026-06-04T10:00:00.000Z" },
     ])).toMatchObject([
-      { productNo: 123456, productName: "Test Product", colorId: "18891", colorName: "BROWN", originalPrice: 80, salePrice: 60, salePercent: 0.25, scrapedDate: "2026-06-03T10:00:00.000Z" },
-      { productNo: 123456, productName: "Test Product", colorId: "1274", colorName: "BLACK", originalPrice: null, salePrice: null, salePercent: null, scrapedDate: "2026-06-04T10:00:00.000Z" },
+      { productNo: '123456', productName: "Test Product", colorId: "18891", colorName: "BROWN", originalPrice: 80, salePrice: 60, salePercent: 0.25, scrapedDate: "2026-06-03T10:00:00.000Z" },
+      { productNo: '123456', productName: "Test Product", colorId: "1274", colorName: "BLACK", originalPrice: null, salePrice: null, salePercent: null, scrapedDate: "2026-06-04T10:00:00.000Z" },
     ]);
+  });
+  test('both raw history responses preserve decimal product IDs and SQL microseconds', () => {
+    const row = { ...product, product_no: '9007199254740993', color_id: '1274', scraped_date: '2026-10-13T12:00:00.123456Z' };
+    expect(formatProductPriceHistory([row]).colors[0].history[0].scrapedDate).toBe(row.scraped_date);
+    expect(formatProductPriceForDate([row])[0]).toMatchObject({ productNo: '9007199254740993', scrapedDate: row.scraped_date });
   });
 });

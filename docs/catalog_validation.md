@@ -118,3 +118,34 @@ Highcharts free-use eligibility is restricted to qualifying personal/educational
 non-commercial use, with personal use also non-professional. Any commercial or
 professional use needs reevaluation and the applicable commercial license; see the
 README and [Highcharts EULA](https://shop.highcharts.com/license-eula).
+
+## Final whole-branch review verification — 2026-10-13
+
+The final fix wave uses realistic color IDs (1274/18891) and observed 3XS, ONE,
+numeric and combined-size options. Its fixture has 120 products, 240 colors, 720 raw
+prices and 741 raw stock rows. Four refreshes each produce 357 eligible daily points;
+the intentional failed fifth refresh preserves active snapshot 4 and its failed marker.
+History regression checks compare only common dates, excluding natural window expiry.
+
+The independent staged export at `/private/tmp/aritzia-final-index.QbtNFC` installed
+its own lockfile dependencies. It passed 89/89 tracked unit tests, 37/37 PostgreSQL
+tests, typecheck, production build, and 19/19 applicable browser scenarios in 26.7 s.
+The single skipped case is a duplicate mobile-project invocation of the scenario
+that already checks 320, 600, 834, 1080 and 1440 px in the desktop project. Geometry
+assertions cover 1/1/2/3/4 columns, mobile drawers at 100% viewport width, no overflow,
+offscreen keyboard focus after 120 cards, and 340/260 px chart loading/empty states.
+
+Final clean-export performance (desktop/mobile): catalog encoded JS 205,575 B each,
+initial render 117.9/197.1 ms, LCP 40/32 ms, CLS 0/0, maximum Event Timing 48/56 ms,
+filter latency 335.1/421.0 ms, scroll p95 17.4/17.2 ms, DOM 8,065/7,663 nodes, heap
+growth 1,846,980/2,299,484 B, and detail charts 480.0/417.5 ms. Additional detail JS
+is 182,444 B. Catalog chunks contain no Highcharts implementation. All local budgets
+pass with shared fonts/separators and content-visibility enabled; these remain local
+unthrottled fallback-image measurements, not field or mobile-network claims.
+
+Read-only profile captured at 2026-10-13T19:46:06Z: default/combined/continuation/
+exact-total execution 1.522/1.479/1.479/0.201 ms on the 120-product fixture. Combined
+filters actually match 61 products using a snapshot color ID, replacing the old
+name-like diagnostic value. The clean DB suite's 10,000-product/20,000-color plans
+execute in 35.827/39.314/39.869/1.216 ms with zero disk reads. Full evidence is in
+the final-fix report and `/private/tmp/aritzia-final-{clean-unit,clean-db,clean-build,clean-e2e}.log`.

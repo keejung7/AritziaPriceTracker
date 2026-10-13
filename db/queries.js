@@ -141,7 +141,7 @@ async function getProductPriceHistory({
         ps.original_price,
         ps.sale_price,
         ps.sale_percent,
-        ps.scraped_date
+        to_char(ps.scraped_date AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS scraped_date
     FROM aritzia_products.price_snapshots ps
     JOIN aritzia_products.products p ON ps.product_no = p.product_no
     JOIN aritzia_products.product_colors pc
@@ -174,7 +174,7 @@ async function getProductPriceForDate({ productNo, date }) {
         ps.original_price,
         ps.sale_price,
         ps.sale_percent,
-        ps.scraped_date
+        to_char(ps.scraped_date AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS scraped_date
     FROM aritzia_products.price_snapshots ps
     JOIN aritzia_products.products p on ps.product_no = p.product_no
     JOIN aritzia_products.colors c on ps.color_id = c.color_id

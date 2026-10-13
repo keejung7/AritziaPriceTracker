@@ -1,4 +1,4 @@
-import type { ProductColorPriceHistory, ProductPrice, ProductStock } from './priceHistoryService';
+import type { ProductColorPriceHistory, ProductPrice, ProductPriceHistory, ProductStock } from './priceHistoryService';
 
 export type HistoryMode = 'selected' | 'product';
 export interface PricePoint {
@@ -24,11 +24,21 @@ export function observationDiscount(point: ProductPrice | null): number | null {
   return point.salePercent === 0 ? 0 : null;
 }
 export function latestObservation(color: ProductColorPriceHistory): ProductPrice | null {
-  return [...color.history].sort((a, b) => Date.parse(b.scrapedDate) - Date.parse(a.scrapedDate))[0] ?? null;
+  return [...color.history].sort((a, b) => compareObservations(b, a))[0] ?? null;
+}
+function compareObservations(a: ProductPrice, b: ProductPrice) {
+  const milliseconds = Date.parse(a.scrapedDate) - Date.parse(b.scrapedDate);
+  // SQL emits UTC strings with six fractional digits. Preserve ordering within
+  // one JS millisecond as well as the lossless observation identity in tooltips.
+  const fraction = (value: string) => (value.match(/\.(\d+)Z$/)?.[1] ?? '').padEnd(6, '0');
+  return milliseconds || fraction(a.scrapedDate).localeCompare(fraction(b.scrapedDate));
 }
 function dailyObservations(color: ProductColorPriceHistory) {
   const days = new Map<string, ProductPrice>();
-  for (const point of [...color.history].sort((a, b) => Date.parse(a.scrapedDate) - Date.parse(b.scrapedDate))) {
+  // Exactly mirror DAILY_SERIES: first choose the latest observation with
+  // same-timestamp stock, then filter availability. An incomplete price cannot
+  // erase a complete observation; a later complete sold-out observation can.
+  for (const point of [...color.history].filter(p => p.stock.length > 0).sort(compareObservations)) {
     days.set(point.scrapedDate.slice(0, 10), point);
   }
   return days;
@@ -46,7 +56,7 @@ export function getPricePoints(colors: ProductColorPriceHistory[], selectedColor
   return dates(included).map(date => {
     const candidates = daily.flatMap(({ color, observations }) => {
       const observation = observations.get(date);
-      if (!observation || (mode === 'product' && !observation.stock.some(s => s.isAvailable))) return [];
+      if (!observation || !observation.stock.some(s => s.isAvailable)) return [];
       const price = observation.salePrice ?? observation.originalPrice;
       return price != null && Number.isFinite(price) ? [{ color, observation, price }] : [];
     }).sort((a, b) => a.price - b.price || a.color.colorId.localeCompare(b.color.colorId));
@@ -59,13 +69,21 @@ export function getPricePoints(colors: ProductColorPriceHistory[], selectedColor
   });
 }
 export function getLowAnnotation(points: PricePoint[]): string | null {
-  const low = points.filter(p => p.y != null).sort((a, b) => a.y! - b.y! || a.x - b.x)[0];
-  return low ? `Lowest observed: ${formatCAD(low.y)} · ${low.colorName} · ${low.date}` : null;
+  const current = points.at(-1);
+  if (current?.y == null) return null;
+  const eligible = points.filter(p => p.y != null);
+  const minimum = (from: number) => Math.min(...eligible.filter(p => p.x >= from).map(p => p.y!));
+  const span = current.x - points[0].x;
+  const label = current.y <= minimum(-Infinity) ? 'Lowest ever'
+    : span >= 89 * DAY && current.y <= minimum(current.x - 89 * DAY) ? 'Lowest in 90 days'
+    : span >= 29 * DAY && current.y <= minimum(current.x - 29 * DAY) ? 'Lowest in 30 days' : null;
+  return label ? `${label}: ${formatCAD(current.y)} · ${current.colorName} · ${current.date}` : null;
 }
 export interface AvailabilityPoint { x: number; y: number | null; date: string; stock: ProductStock[]; observedAt: string | null }
 export function availableSizeCount(stock: ProductStock[]): number | null {
-  if (!stock.length || stock.some(s => !s.isAvailable && !/^(Sold Out|Unavailable)$/i.test(s.status?.trim() ?? ''))) return null;
-  return stock.filter(s => s.isAvailable).length;
+  const available = stock.filter(s => s.isAvailable).length;
+  if (available > 0) return available;
+  return stock.length && stock.every(s => /^(Sold Out|Unavailable)$/i.test(s.status?.trim() ?? '')) ? 0 : null;
 }
 export function getAvailabilityPoints(color: ProductColorPriceHistory): AvailabilityPoint[] {
   const daily = dailyObservations(color);
@@ -74,4 +92,20 @@ export function getAvailabilityPoints(color: ProductColorPriceHistory): Availabi
     const stock = observation?.stock ?? [];
     return { x: Date.parse(`${date}T00:00:00Z`), y: availableSizeCount(stock), date, stock, observedAt: observation?.scrapedDate ?? null };
   });
+}
+export interface PriceHistorySeries { points: PricePoint[]; lowAnnotation: string | null }
+export interface ProductChartHistory {
+  product: PriceHistorySeries;
+  colors: Record<string, { price: PriceHistorySeries; availability: AvailabilityPoint[] }>;
+}
+export interface ProductHistoryResponse extends ProductPriceHistory { chartHistory: ProductChartHistory }
+// This runs at the API boundary. Renderers consume the same authoritative points
+// and labels, rather than each choosing eligibility or daily representatives.
+export function getProductChartHistory(colors: ProductColorPriceHistory[], { completeHistory = true } = {}): ProductChartHistory {
+  const series = (mode: HistoryMode, colorId = '') => {
+    const points = getPricePoints(colors, colorId, mode);
+    return { points, lowAnnotation: completeHistory ? getLowAnnotation(points) : null };
+  };
+  return { product: series('product'), colors: Object.fromEntries(colors.map(color => [color.colorId,
+    { price: series('selected', color.colorId), availability: getAvailabilityPoints(color) }])) };
 }

@@ -9,7 +9,7 @@ import { chartTheme } from './chartTheme';
 export default function AvailabilityHistoryChart({ points, colorName, descriptionId }: { points: AvailabilityPoint[]; colorName: string; descriptionId: string }) {
   const reducedMotion = useReducedMotion();
   return <Chart options={{
-    chart: { height: 260, backgroundColor: 'transparent', animation: !reducedMotion, style: { fontFamily: 'inherit', color: chartTheme.ink } },
+    chart: { height: 260, backgroundColor: 'transparent', animation: !reducedMotion, style: { fontFamily: chartTheme.fontFamily, color: chartTheme.ink } },
     title: { text: undefined }, credits: { enabled: false }, legend: { enabled: false },
     accessibility: { enabled: true, linkedDescription: `#${descriptionId}`, keyboardNavigation: { enabled: true }, point: { descriptionFormatter: point => { const p = point.options.custom as AvailabilityPoint; return `${colorName}, ${p.date}, ${p.y} available sizes.`; } } },
     xAxis: { type: 'datetime', lineColor: chartTheme.axis, title: { text: 'Observation date (UTC)' } },

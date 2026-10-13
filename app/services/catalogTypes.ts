@@ -52,11 +52,13 @@ export interface CatalogProduct {
   colors: CatalogColor[];
 }
 export interface CatalogResponse {
-  products: CatalogProduct[];
+  items: CatalogProduct[];
   total: number;
   nextCursor: string | null;
-  snapshot: { id: string; dataAsOf: string; refreshedAt: string; status: 'active' | 'stale' };
+  snapshot: { id: string; dataAsOf: string; refreshedAt: string; status: 'current' | 'stale' };
+  filterOptions: CatalogFilterOptions;
 }
+export interface CatalogFilterOptions { colors: { id: string; name: string }[]; sizes: string[] }
 export type CatalogErrorCode = 'invalid_query' | 'invalid_cursor' | 'cursor_expired' | 'catalog_unavailable';
 export class CatalogError extends Error {
   constructor(public code: CatalogErrorCode, public status: number, message: string) { super(message); }

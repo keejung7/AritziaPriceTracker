@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CatalogProduct, CatalogResponse, CatalogSort } from '../../services/catalogTypes';
+import type { CatalogFilterOptions, CatalogProduct, CatalogResponse, CatalogSort } from '../../services/catalogTypes';
 
 export interface CatalogFiltersState {
   search: string;
@@ -25,6 +25,7 @@ export function useCatalogProducts(filters: CatalogFiltersState) {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [snapshot, setSnapshot] = useState<CatalogResponse['snapshot'] | null>(null);
+  const [filterOptions, setFilterOptions] = useState<CatalogFilterOptions>({ colors: [], sizes: [] });
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -90,7 +91,7 @@ export function useCatalogProducts(filters: CatalogFiltersState) {
           const page = body as CatalogResponse;
           setProducts(current => {
             const unique = new Map<string, CatalogProduct>();
-            for (const product of [...(requestedCursor === null ? [] : current), ...page.products]) {
+            for (const product of [...(requestedCursor === null ? [] : current), ...page.items]) {
               if (!unique.has(product.productNo)) unique.set(product.productNo, product);
             }
             return [...unique.values()];
@@ -100,6 +101,7 @@ export function useCatalogProducts(filters: CatalogFiltersState) {
           setNextCursor(cursor);
           setTotal(page.total);
           setSnapshot(page.snapshot);
+          setFilterOptions(page.filterOptions);
           break;
         }
       } catch (requestError) {
@@ -133,5 +135,5 @@ export function useCatalogProducts(filters: CatalogFiltersState) {
 
   const loadMore = useCallback(() => actions.current.loadMore(), []);
   const retry = useCallback(() => actions.current.retry(), []);
-  return { products, total, snapshot, nextCursor, isLoading, isLoadingMore, error, loadMore, retry };
+  return { products, total, snapshot, filterOptions, nextCursor, isLoading, isLoadingMore, error, loadMore, retry };
 }

@@ -29,6 +29,19 @@ export function parseCatalogQuery(params: URLSearchParams): CatalogQuery {
 }
 
 const numeric = (value: unknown): number | null => value == null ? null : Number(value);
+// Preserve observed labels (including combined sizes), ordering alpha sizes by
+// fit, then numeric sizes numerically, one-size labels, and other labels naturally.
+function sizeKey(size: string): [number, number] {
+  const alpha = ['4XS','3XS','2XS','XXS','XS','S','M','L','XL','2XL','XXL','3XL','4XL'];
+  const parts = size.toUpperCase().split('/');
+  if (parts.every(p => alpha.includes(p))) return [0, parts.reduce((sum,p) => sum + alpha.indexOf(p),0) / parts.length];
+  if (parts.every(p => /^\d+(\.\d+)?$/.test(p))) return [1, parts.reduce((sum,p) => sum + Number(p),0) / parts.length];
+  return /^(ONE|ONE SIZE|OS)$/i.test(size) ? [2,0] : [3,0];
+}
+function compareSizes(a: string, b: string) {
+  const ak=sizeKey(a), bk=sizeKey(b);
+  return ak[0]-bk[0] || ak[1]-bk[1] || (ak[0] === 1 ? b.length-a.length : 0) || a.localeCompare(b,'en',{numeric:true}) || (a<b?-1:a>b?1:0);
+}
 export async function getCatalogProducts(query: CatalogQuery, database?: { query: (sql: string, values: unknown[]) => Promise<any> }): Promise<CatalogResponse> {
   const result = await queryCatalogProducts(query,database);
   if (!result.snapshot) throw new CatalogError(query.cursor ? 'cursor_expired' : 'catalog_unavailable',query.cursor ? 400 : 503,
@@ -44,6 +57,7 @@ export async function getCatalogProducts(query: CatalogQuery, database?: { query
   }));
   const last=result.products[result.products.length-1];
   const lastSortValue=last?.cursor_sort_value == null ? null : ['discount-desc','price-asc','price-desc'].includes(query.sort) ? Number(last.cursor_sort_value) : last.cursor_sort_value;
-  return {products,total:result.total,nextCursor:result.has_more && last ? encodeCatalogCursor({snapshotId:String(result.snapshot.snapshot_id),sort:query.sort,lastProductNo:String(last.product_no),lastSortValue}) : null,
-    snapshot:{id:result.snapshot.snapshot_id,dataAsOf:result.snapshot.data_as_of,refreshedAt:result.snapshot.activated_at,status:result.snapshot.stale ? 'stale' : 'active'}};
+  return {items:products,total:result.total,nextCursor:result.has_more && last ? encodeCatalogCursor({snapshotId:String(result.snapshot.snapshot_id),sort:query.sort,lastProductNo:String(last.product_no),lastSortValue}) : null,
+    snapshot:{id:result.snapshot.snapshot_id,dataAsOf:result.snapshot.data_as_of,refreshedAt:result.snapshot.activated_at,status:result.snapshot.stale ? 'stale' : 'current'},
+    filterOptions:{colors:result.filter_options?.colors ?? [],sizes:[...(result.filter_options?.sizes ?? [])].sort(compareSizes)}};
 }

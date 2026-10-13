@@ -9,7 +9,7 @@ import { chartTheme } from './chartTheme';
 export default function PriceHistoryChart({ points, descriptionId }: { points: PricePoint[]; descriptionId: string }) {
   const reducedMotion = useReducedMotion();
   return <Chart options={{
-    chart: { height: 340, backgroundColor: 'transparent', animation: !reducedMotion, style: { fontFamily: 'inherit', color: chartTheme.ink } },
+    chart: { height: 340, backgroundColor: 'transparent', animation: !reducedMotion, style: { fontFamily: chartTheme.fontFamily, color: chartTheme.ink } },
     title: { text: undefined }, credits: { enabled: false }, legend: { enabled: false },
     accessibility: { enabled: true, linkedDescription: `#${descriptionId}`, keyboardNavigation: { enabled: true }, point: { descriptionFormatter: point => { const p = point.options.custom as PricePoint; return `${p.date}, ${p.colorName}, ${formatCAD(p.y)}, regular ${formatCAD(p.regularPrice)}, ${p.discount == null ? 'discount unavailable' : `${p.discount} percent discount`}.`; } } },
     xAxis: { type: 'datetime', lineColor: chartTheme.axis, tickColor: chartTheme.axis, title: { text: 'Observation date (UTC)' } },

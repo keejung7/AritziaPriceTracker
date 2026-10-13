@@ -116,7 +116,12 @@ async function refreshCatalogReadModel(pool, options = {}) {
         WHEN c.from_price<=lows.days90 THEN 'Lowest in 90 days'
         WHEN c.from_price<=lows.days30 THEN 'Lowest in 30 days' END
       FROM lows WHERE c.snapshot_id=$1 AND c.product_no=lows.product_no`, [snapshotId,dataAsOf]);
-    const countsResult = await run('validate_counts', `${DAILY_SERIES} SELECT
+    const countsResult = await run('validate_counts', `${DAILY_SERIES}, history_overlap AS (
+      SELECT GREATEST(($2::timestamptz AT TIME ZONE 'UTC')::date-($3::integer-1),min(h.observation_date)) AS first_date,
+        LEAST(($2::timestamptz AT TIME ZONE 'UTC')::date,(s.data_as_of AT TIME ZONE 'UTC')::date) AS last_date
+      FROM aritzia_products.catalog_snapshots s LEFT JOIN aritzia_products.catalog_product_price_history h USING(snapshot_id)
+      WHERE s.status='active' GROUP BY s.data_as_of
+    ) SELECT
       (EXISTS (SELECT 1 FROM eligible_daily_colors WHERE effective_price<0 OR original_price<0 OR sale_price<0)
         OR EXISTS (SELECT 1 FROM aritzia_products.catalog_product_colors WHERE snapshot_id=$1
           AND availability_status='available' AND (effective_price<0 OR original_price<0 OR sale_price<0))
@@ -127,16 +132,22 @@ async function refreshCatalogReadModel(pool, options = {}) {
       (SELECT count(*) FROM aritzia_products.catalog_products WHERE snapshot_id=$1) AS product_count,
       (SELECT count(*) FROM aritzia_products.catalog_product_colors WHERE snapshot_id=$1) AS color_count,
       (SELECT count(*) FROM aritzia_products.catalog_product_price_history WHERE snapshot_id=$1) AS history_count,
+      (SELECT count(*) FROM aritzia_products.catalog_product_price_history h CROSS JOIN history_overlap w
+        WHERE h.snapshot_id=$1 AND h.observation_date BETWEEN w.first_date AND w.last_date) AS comparable_history_count,
+      (SELECT count(*) FROM aritzia_products.catalog_product_price_history h JOIN aritzia_products.catalog_snapshots s USING(snapshot_id)
+        CROSS JOIN history_overlap w WHERE s.status='active' AND h.observation_date BETWEEN w.first_date AND w.last_date) AS previous_comparable_history_count,
       (SELECT count(*) FROM aritzia_products.catalog_products p JOIN aritzia_products.catalog_snapshots s USING(snapshot_id) WHERE s.status='active') AS previous_product_count,
-      (SELECT count(*) FROM aritzia_products.catalog_product_colors p JOIN aritzia_products.catalog_snapshots s USING(snapshot_id) WHERE s.status='active') AS previous_color_count`, [snapshotId]);
+      (SELECT count(*) FROM aritzia_products.catalog_product_colors p JOIN aritzia_products.catalog_snapshots s USING(snapshot_id) WHERE s.status='active') AS previous_color_count`, [snapshotId,dataAsOf,historyDays]);
     const counts = countsResult.rows[0];
     if (counts.has_negative_price) throw new Error('Catalog validation rejected a negative price');
-    for (const kind of ['product','color']) {
-      const previous = Number(counts[`previous_${kind}_count`]);
-      const current = Number(counts[`${kind}_count`]);
+    for (const kind of ['product','color','history']) {
+      const key=kind === 'history' ? 'comparable_history' : kind;
+      const previous = Number(counts[`previous_${key}_count`]);
+      const current = Number(counts[`${key}_count`]);
       if (previous>0 && current/previous<failureRegressionRatio) throw new Error(`Severe ${kind} count regression: ${previous} -> ${current}`);
       if (previous>0 && current/previous<warningRegressionRatio) logger.warn(`catalog warning ${kind} count regression: ${previous} -> ${current}`);
     }
+    logger.info(`catalog history comparison previous=${counts.previous_comparable_history_count} current=${counts.comparable_history_count} window=overlap`);
     logger.info(`catalog counts productCount=${counts.product_count} colorCount=${counts.color_count} historyCount=${counts.history_count}`);
     await run('activate_snapshot', `WITH deactivate AS (
       UPDATE aritzia_products.catalog_snapshots SET status='inactive' WHERE status='active' RETURNING snapshot_id)

@@ -1,12 +1,5 @@
 html {
   color-scheme: light;
-  --catalog-background: #F5F1EA;
-  --catalog-surface: #FBF8F3;
-  --catalog-text: #2B2825;
-  --catalog-muted: #756F68;
-  --catalog-border: #DDD5CB;
-  --catalog-accent: #722F3D;
-  --catalog-accent-soft: #F0E2E5;
 }
 
 body {
@@ -14,7 +7,7 @@ body {
   margin: 0;
   background: var(--catalog-background);
   color: var(--catalog-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--catalog-font-family);
 }
 
 * {
@@ -25,7 +18,7 @@ a {
   color: inherit;
 }
 
-.catalog-card { min-width: 0; font-size: 14px; line-height: 1.5; }
+.catalog-card { min-width: 0; font-size: 14px; line-height: 1.5; content-visibility: auto; contain-intrinsic-size: auto 680px; }
 .catalog-card p { margin: 8px 0; }
 .catalog-image { aspect-ratio: 3 / 4; background: var(--catalog-surface); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .catalog-image img { display: block; width: 100%; height: 100%; object-fit: cover; }

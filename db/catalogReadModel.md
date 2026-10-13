@@ -14,7 +14,11 @@ masking the original refresh error.
 Defaults: `historyDays=90`, `statementTimeoutMs=120000`,
 `warningRegressionRatio=0.75`, `failureRegressionRatio=0.50`,
 `retainedSnapshots=2`. Ratios compare new product/color counts to the active
-snapshot; below 0.75 warns, below 0.50 aborts. Retention keeps the active snapshot
+snapshot; below 0.75 warns, below 0.50 aborts. History uses those thresholds only
+over common UTC dates: the later of the new window start and prior history start,
+through the earlier data-as-of date. New dates cannot mask losses, normal expiry
+does not count as regression, and a zero comparable baseline skips that check.
+Logs include both comparable history counts. Retention keeps the active snapshot
 plus the two most recent inactive/failed snapshots. `logger` may be injected;
 the default saves stage durations, counts, warnings, failures, and total duration
 through `DB_LOG_PATH` beside the pipeline's timestamped artifacts.

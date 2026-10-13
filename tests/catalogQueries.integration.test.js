@@ -21,29 +21,51 @@ describe('same-color catalog and snapshot pagination',()=>{
       SELECT 1,n,'Product '||n,'Brand',ARRAY['tops'],CASE WHEN n=30 THEN NULL ELSE 'red' END,CASE WHEN n=30 THEN NULL ELSE 50 END,CASE WHEN n=30 THEN NULL ELSE 100 END,CASE WHEN n=30 THEN NULL ELSE 50 END,CASE WHEN n=30 THEN 'sold_out' ELSE 'available' END FROM generate_series(1,30) n`);
   });
   const get=raw=>getCatalogProducts(parseCatalogQuery(new URLSearchParams(raw)),db.client);
+  test('catalog-wide named color IDs and observed size metadata stay bound to the resolved snapshot',async()=>{
+    await db.query(`INSERT INTO aritzia_products.colors(color_id,color_name) VALUES('1274','Black'),('3042','Black'),('18891','Brown');
+      INSERT INTO aritzia_products.product_colors(product_no,color_id) VALUES(1,'1274'),(2,'1274'),(1,'3042'),(2,'18891');
+      INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,color_name,effective_price,available_sizes,availability_status,scraped_date) VALUES
+      (1,1,'1274','Black',60,ARRAY['3XS','ONE','00','0'],'available',now()),
+      (1,2,'1274','Onyx',70,ARRAY['2','10'],'available',now()),
+      (1,1,'3042','Black',70,ARRAY['XS/S','M/L'],'available',now()),
+      (1,2,'18891',NULL,70,ARRAY['XS'],'available',now());`);
+    const first=await get('color=1274&size=ONE&limit=1');
+    expect(first.total).toBe(1);
+    expect(first.items[0].selectedColorId).toBe('1274');
+    expect(first.filterOptions.colors.filter(c=>/^\d+$/.test(c.id))).toEqual([{id:'18891',name:'18891'},{id:'1274',name:'Black'},{id:'3042',name:'Black'}]);
+    expect(first.filterOptions.sizes).toEqual(['3XS','XS','XS/S','S','M','M/L','00','0','2','10','ONE']);
+    const paging=await get('limit=2');
+    await db.query("UPDATE aritzia_products.catalog_snapshots SET status='inactive' WHERE snapshot_id=1; INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of,activated_at) VALUES(2,'active',now(),now()); INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of) VALUES(3,'failed',now())");
+    const retained=await get('limit=2&cursor='+paging.nextCursor);
+    expect(retained.snapshot).toMatchObject({id:'1',status:'stale'});
+    expect(retained.filterOptions).toEqual(paging.filterOptions);
+    const active=await get('');
+    expect(active.snapshot).toMatchObject({id:'2',status:'stale'});
+    expect(active.filterOptions).toEqual({colors:[],sizes:[]});
+  });
   test('all predicates belong to one available color; size values are OR',async()=>{
     expect((await get('color=black&saleOnly=true')).total).toBe(0);
     expect((await get('size=S&saleOnly=true')).total).toBe(0);
     expect((await get('size=S&size=M&saleOnly=true')).total).toBe(29);
     expect((await get('color=black&maxPrice=60')).total).toBe(0);
-    expect((await get('minPrice=70&maxPrice=90')).products[0].selectedColorId).toBe('black');
+    expect((await get('minPrice=70&maxPrice=90')).items[0].selectedColorId).toBe('black');
   });
   test('global From metadata stays paired while filtered representative changes',async()=>{
-    const product=(await get('color=black')).products[0];
+    const product=(await get('color=black')).items[0];
     expect(product).toMatchObject({fromColorId:'red',fromPrice:50,fromOriginalPrice:100,fromSalePercent:50,selectedColorId:'black'});
     expect(product.colors.find(c=>c.colorId==='black')).toMatchObject({effectivePrice:80,salePercent:0});
-    expect((await get('')).products[0].selectedColorId).toBe('red');
+    expect((await get('')).items[0].selectedColorId).toBe('red');
     expect(product).not.toHaveProperty('history');
   });
   test('pages equal discounts without gaps, includes unavailable last and fetches colors only for page',async()=>{
     const first=await get('');
-    expect(first.products).toHaveLength(24);
-    expect(first.products.flatMap(p=>p.colors)).toHaveLength(48);
+    expect(first.items).toHaveLength(24);
+    expect(first.items.flatMap(p=>p.colors)).toHaveLength(48);
     expect(first.total).toBe(30);
     const second=await get('cursor='+first.nextCursor);
-    expect([...first.products,...second.products].map(p=>p.productNo)).toEqual(Array.from({length:30},(_,i)=>String(i+1)));
+    expect([...first.items,...second.items].map(p=>p.productNo)).toEqual(Array.from({length:30},(_,i)=>String(i+1)));
     expect(second.nextCursor).toBeNull();
-    expect(second.products.at(-1).availabilityStatus).toBe('sold_out');
+    expect(second.items.at(-1).availabilityStatus).toBe('sold_out');
   });
   test('cursor stays on retained snapshot and expires when removed',async()=>{
     const first=await get('limit=2');
@@ -52,7 +74,7 @@ describe('same-color catalog and snapshot pagination',()=>{
     await db.query(`INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of,activated_at) VALUES(2,'active',now(),now())`);
     const second=await get('limit=2&cursor='+first.nextCursor);
     expect(second.snapshot.id).toBe('1');
-    expect(second.products.map(p=>p.productNo)).toEqual(['3','4']);
+    expect(second.items.map(p=>p.productNo)).toEqual(['3','4']);
     await db.query(`DELETE FROM aritzia_products.catalog_snapshots WHERE snapshot_id=1`);
     await expect(get('cursor='+first.nextCursor)).rejects.toMatchObject({code:'cursor_expired',status:400});
   });
@@ -66,16 +88,16 @@ describe('same-color catalog and snapshot pagination',()=>{
     let cursor=null, ids=[];
     do {
       const page=await get(`limit=7&sort=${sort}${cursor?'&cursor='+cursor:''}`);
-      ids.push(...page.products.map(p=>p.productNo)); cursor=page.nextCursor;
+      ids.push(...page.items.map(p=>p.productNo)); cursor=page.nextCursor;
     } while(cursor);
     expect(ids).toHaveLength(30); expect(new Set(ids).size).toBe(30); expect(ids.at(-1)).toBe('30');
   });
   test('descending prices paginate differing values and ties before unavailable products',async()=>{
     await db.query(`UPDATE aritzia_products.catalog_product_colors SET effective_price=CASE product_no WHEN 1 THEN 90 WHEN 2 THEN 70 WHEN 3 THEN 70 ELSE 20 END WHERE color_id='red'`);
     const first=await get('limit=2&sort=price-desc');
-    expect(first.products.map(p=>p.productNo)).toEqual(['1','2']);
+    expect(first.items.map(p=>p.productNo)).toEqual(['1','2']);
     const second=await get('limit=2&sort=price-desc&cursor='+first.nextCursor);
-    expect(second.products.map(p=>p.productNo)).toEqual(['3','4']);
+    expect(second.items.map(p=>p.productNo)).toEqual(['3','4']);
   });
   test('preserves bigint identifiers and six-digit UTC timestamps through continuation and expiry',async()=>{
     const snapshot='9007199254740993';
@@ -94,11 +116,11 @@ describe('same-color catalog and snapshot pagination',()=>{
       VALUES($1,$2,'First','red','available',$4::timestamptz),($1,$3,'Second','red','available',$4::timestamptz)`,[snapshot,firstId,secondId,timestamp]);
     const first=await get('limit=1&sort=observed-desc');
     expect(first.snapshot).toMatchObject({id:snapshot,dataAsOf:timestamp,refreshedAt:timestamp});
-    expect(first.products[0]).toMatchObject({productNo:firstId,trackingStartedAt:timestamp});
-    expect(first.products[0].colors[0].scrapedDate).toBe(timestamp);
+    expect(first.items[0]).toMatchObject({productNo:firstId,trackingStartedAt:timestamp});
+    expect(first.items[0].colors[0].scrapedDate).toBe(timestamp);
     expect(decodeCatalogCursor(first.nextCursor,'observed-desc')).toMatchObject({snapshotId:snapshot,lastProductNo:firstId,lastSortValue:timestamp});
     const second=await get(`limit=1&sort=observed-desc&cursor=${first.nextCursor}`);
-    expect(second.products.map(p=>p.productNo)).toEqual([secondId]);
+    expect(second.items.map(p=>p.productNo)).toEqual([secondId]);
     expect(second.nextCursor).toBeNull();
     await db.query(`DELETE FROM aritzia_products.catalog_snapshots WHERE snapshot_id=$1`,[snapshot]);
     await expect(get(`sort=observed-desc&cursor=${first.nextCursor}`)).rejects.toMatchObject({code:'cursor_expired',status:400});

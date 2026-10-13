@@ -21,7 +21,7 @@ async function profileCatalogQueries(connectionString) {
     const last = initial.products.at(-1);
     const shapes = {
       default: first,
-      combined: buildCatalogQuery({ ...base, category: 'tops', color: 'red', sizes: ['M'], minPrice: 40, maxPrice: 60, saleOnly: true, minDiscount: 20 }),
+      combined: buildCatalogQuery({ ...base, category: 'tops', color: initial.products[0].selected_color_id, sizes: ['M'], minPrice: 40, maxPrice: 60, saleOnly: true, minDiscount: 20 }),
       continuation: buildCatalogQuery({ ...base, cursor: { snapshotId: initial.snapshot.snapshot_id, sort: base.sort, lastSortValue: last.cursor_sort_value, lastProductNo: last.product_no } }),
       'exact-total': { text: "SELECT count(*) FROM aritzia_products.catalog_products WHERE snapshot_id=$1", values: [initial.snapshot.snapshot_id] },
     };

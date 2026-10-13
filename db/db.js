@@ -1,9 +1,16 @@
 const pg = require("pg");
 const dotenv = require("dotenv").config();
+const path = require("path");
 const { Pool } = pg;
 
 const { refreshCatalogReadModel } = require("./catalogReadModel.js");
+const {
+  createDbLogger,
+  formatCounts,
+  summarizeRows,
+} = require("./loadLogging.js");
 const MAX_BATCH_PARAMS = 5000;
+const logger = createDbLogger();
 
 const pool = new Pool(
   process.env.DATABASE_URL
@@ -22,17 +29,31 @@ const pool = new Pool(
 
 // For each product, insert product information
 async function main() {
+  const startedAt = Date.now();
+  const inputPath =
+    process.env.PRODUCT_DETAILS_PATH ||
+    process.argv[2] ||
+    path.join(__dirname, "..", "product_details.jsonl");
+
+  const runId = path.basename(inputPath).match(/^product_details_(.+)\.jsonl$/)?.[1] ?? 'manual';
+  logger.info(`Loading artifact: ${inputPath} runId=${runId}`);
   const products = require("./parser.js").getProductDataForInsert();
   const rows = collectRowsForInsert(products);
+  logger.info(`Prepared: ${formatCounts(summarizeRows(rows))}`);
 
-  await saveParsedProducts(pool, rows);
+  logger.info("Starting transaction...");
+  const affectedRows = await saveParsedProducts(pool, rows);
+  logger.info(`Transaction committed: ${formatCounts(affectedRows)}`);
   await refreshCatalogReadModel(pool);
 
   await pool.end();
+  logger.info(
+    `Completed successfully in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
+  );
 }
 
 if (require.main === module) main().catch((error) => {
-  console.error(error);
+  logger.error(`Failed: ${error.message}\n${error.stack ?? ''}`);
   process.exit(1);
 });
 
@@ -40,21 +61,51 @@ module.exports = { collectRowsForInsert, saveParsedProducts };
 
 async function saveParsedProducts(pool, rows) {
   const client = await pool.connect();
+  const affectedRows = {};
+  let stage = "BEGIN";
 
   try {
     await client.query("BEGIN");
 
-    await insertOrUpdateProductTable(client, rows.products);
-    await insertCategoriesTable(client, rows.categories);
-    await insertProductCategoriesTable(client, rows.productCategories);
-    await insertColorsTable(client, rows.colors);
-    await insertProductColorsTable(client, rows.productColors);
-    await insertPriceSnapshotsTable(client, rows.priceSnapshots);
-    await insertStockSnapshotsTable(client, rows.stockSnapshots);
+    stage = "products";
+    affectedRows.products = await insertOrUpdateProductTable(
+      client,
+      rows.products,
+    );
+    stage = "categories";
+    affectedRows.categories = await insertCategoriesTable(
+      client,
+      rows.categories,
+    );
+    stage = "productCategories";
+    affectedRows.productCategories = await insertProductCategoriesTable(
+      client,
+      rows.productCategories,
+    );
+    stage = "colors";
+    affectedRows.colors = await insertColorsTable(client, rows.colors);
+    stage = "productColors";
+    affectedRows.productColors = await insertProductColorsTable(
+      client,
+      rows.productColors,
+    );
+    stage = "priceSnapshots";
+    affectedRows.priceSnapshots = await insertPriceSnapshotsTable(
+      client,
+      rows.priceSnapshots,
+    );
+    stage = "stockSnapshots";
+    affectedRows.stockSnapshots = await insertStockSnapshotsTable(
+      client,
+      rows.stockSnapshots,
+    );
 
+    stage = "COMMIT";
     await client.query("COMMIT");
+    return affectedRows;
   } catch (error) {
     await client.query("ROLLBACK");
+    logger.error(`Transaction rolled back during ${stage}`);
     throw error;
   } finally {
     client.release();
@@ -154,7 +205,7 @@ function buildValues(rows, columns) {
 }
 
 async function insertOrUpdateProductTable(client, products) {
-  if (products.length === 0) return;
+  if (products.length === 0) return 0;
 
   const sql = `
 INSERT INTO aritzia_products.products (
@@ -173,6 +224,7 @@ DO UPDATE SET
   product_brand = EXCLUDED.product_brand
 `;
 
+  let affectedRows = 0;
   for (const chunk of chunkRowsByParams(products, 5)) {
     const { placeholders, values } = buildValues(chunk, [
       "product_no",
@@ -182,9 +234,15 @@ DO UPDATE SET
       "product_brand",
     ]);
 
-    await client.query(sql.replace("%VALUES%", placeholders), values);
+    const result = await client.query(
+      sql.replace("%VALUES%", placeholders),
+      values,
+    );
+    affectedRows += result.rowCount ?? 0;
   }
+  return affectedRows;
 }
+
 async function insertCategoriesTable(client, categories) {
   if (categories.length === 0) return 0;
 
@@ -247,7 +305,7 @@ color_name
 */
 
 async function insertColorsTable(client, colors) {
-  if (colors.length === 0) return;
+  if (colors.length === 0) return 0;
 
   const sql = `
 	   INSERT INTO aritzia_products.colors AS colors (
@@ -262,6 +320,7 @@ async function insertColorsTable(client, colors) {
       swatch_image_url = COALESCE(EXCLUDED.swatch_image_url, colors.swatch_image_url)
 	  `;
 
+  let affectedRows = 0;
   for (const chunk of chunkRowsByParams(colors, 3)) {
     const { placeholders, values } = buildValues(chunk, [
       "color_id",
@@ -269,11 +328,13 @@ async function insertColorsTable(client, colors) {
       "swatch_image_url",
     ]);
 
-    await client.query(
+    const result = await client.query(
       sql.replace("%VALUES%", placeholders),
       values,
     );
+    affectedRows += result.rowCount ?? 0;
   }
+  return affectedRows;
 }
 
 /* 
@@ -284,7 +345,7 @@ product_no
 */
 
 async function insertProductColorsTable(client, productColors) {
-  if (productColors.length === 0) return;
+  if (productColors.length === 0) return 0;
 
   const sql = `
     INSERT INTO aritzia_products.product_colors AS product_colors (
@@ -301,6 +362,7 @@ async function insertProductColorsTable(client, productColors) {
       )
   `;
 
+  let affectedRows = 0;
   for (const chunk of chunkRowsByParams(productColors, 3)) {
     const { placeholders, values } = buildValues(chunk, [
       "color_id",
@@ -308,11 +370,13 @@ async function insertProductColorsTable(client, productColors) {
       "product_color_image_url",
     ]);
 
-    await client.query(
+    const result = await client.query(
       sql.replace("%VALUES%", placeholders),
       values,
     );
+    affectedRows += result.rowCount ?? 0;
   }
+  return affectedRows;
 }
 
 /*
@@ -326,7 +390,7 @@ scraped_date,
 */
 
 async function insertPriceSnapshotsTable(client, priceSnapshots) {
-  if (priceSnapshots.length === 0) return;
+  if (priceSnapshots.length === 0) return 0;
 
   const sql = `INSERT INTO aritzia_products.price_snapshots (
     color_id,
@@ -341,6 +405,7 @@ async function insertPriceSnapshotsTable(client, priceSnapshots) {
    DO NOTHING
     `;
 
+  let affectedRows = 0;
   for (const chunk of chunkRowsByParams(priceSnapshots, 6)) {
     const { placeholders, values } = buildValues(chunk, [
       "color_id",
@@ -351,8 +416,13 @@ async function insertPriceSnapshotsTable(client, priceSnapshots) {
       "scraped_date",
     ]);
 
-    await client.query(sql.replace("%VALUES%", placeholders), values);
+    const result = await client.query(
+      sql.replace("%VALUES%", placeholders),
+      values,
+    );
+    affectedRows += result.rowCount ?? 0;
   }
+  return affectedRows;
 }
 
 /*
@@ -366,7 +436,7 @@ scraped_date,
 */
 
 async function insertStockSnapshotsTable(client, stockSnapshots) {
-  if (stockSnapshots.length === 0) return;
+  if (stockSnapshots.length === 0) return 0;
 
   const sql = `INSERT INTO aritzia_products.stock_snapshots (
     product_size,
@@ -380,6 +450,7 @@ async function insertStockSnapshotsTable(client, stockSnapshots) {
   DO NOTHING
   `;
 
+  let affectedRows = 0;
   for (const chunk of chunkRowsByParams(stockSnapshots, 5)) {
     const { placeholders, values } = buildValues(chunk, [
       "product_size",
@@ -389,6 +460,11 @@ async function insertStockSnapshotsTable(client, stockSnapshots) {
       "scraped_date",
     ]);
 
-    await client.query(sql.replace("%VALUES%", placeholders), values);
+    const result = await client.query(
+      sql.replace("%VALUES%", placeholders),
+      values,
+    );
+    affectedRows += result.rowCount ?? 0;
   }
+  return affectedRows;
 }

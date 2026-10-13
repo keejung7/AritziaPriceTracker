@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { formatProductPriceHistory } from "../../../../services/priceHistoryService";
+import { getProductChartHistory } from "../../../../services/productChartService";
 
 const { getProductPriceHistory } = require("../../../../../db/queries");
 
@@ -30,5 +31,6 @@ export async function GET(
 
   const formattedRows = formatProductPriceHistory(rows);
 
-  return NextResponse.json(formattedRows);
+  const completeHistory = !['colorId','dateFrom','dateTo'].some(key => searchParams.has(key));
+  return NextResponse.json(formattedRows ? { ...formattedRows, chartHistory: getProductChartHistory(formattedRows.colors, { completeHistory }) } : null);
 }

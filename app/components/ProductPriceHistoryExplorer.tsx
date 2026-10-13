@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Alert, Anchor, Box, Button, Group, Loader, Paper, Stack, Text, Title } from '@mantine/core';
-import type { ProductPriceHistory } from '../services/priceHistoryService';
-import { availableSizeCount, formatCAD, getAvailabilityPoints, getLowAnnotation, getPricePoints, latestObservation, observationDiscount, type HistoryMode } from '../services/productChartService';
+import { availableSizeCount, formatCAD, latestObservation, observationDiscount, type HistoryMode, type ProductHistoryResponse } from '../services/productChartService';
 
-const PriceHistoryChart = dynamic(() => import('./product/PriceHistoryChart'), { ssr: false, loading: () => <Text>Loading chart…</Text> });
-const AvailabilityHistoryChart = dynamic(() => import('./product/AvailabilityHistoryChart'), { ssr: false, loading: () => <Text>Loading chart…</Text> });
+const PriceHistoryChart = dynamic(() => import('./product/PriceHistoryChart'), { ssr: false, loading: () => <Box mih={340}><Text>Loading chart…</Text></Box> });
+const AvailabilityHistoryChart = dynamic(() => import('./product/AvailabilityHistoryChart'), { ssr: false, loading: () => <Box mih={260}><Text>Loading chart…</Text></Box> });
 
 export default function ProductPriceHistoryExplorer({ productNo }: { productNo: string }) {
-  const [product, setProduct] = useState<ProductPriceHistory | null>(null);
+  const [product, setProduct] = useState<ProductHistoryResponse | null>(null);
   const [selectedColorId, setSelectedColorId] = useState('');
   const [mode, setMode] = useState<HistoryMode>('selected');
   const [loading, setLoading] = useState(true);
@@ -21,7 +20,7 @@ export default function ProductPriceHistoryExplorer({ productNo }: { productNo: 
     setLoading(true); setError(null); setMode('selected');
     fetch(`/api/products/${productNo}/price-history`, { signal: controller.signal })
       .then(response => { if (!response.ok) throw new Error(`Price history request failed with ${response.status}`); return response.json(); })
-      .then((history: ProductPriceHistory | null) => { if (!controller.signal.aborted) { setProduct(history); setSelectedColorId(history?.colors[0]?.colorId ?? ''); } })
+      .then((history: ProductHistoryResponse | null) => { if (!controller.signal.aborted) { setProduct(history); setSelectedColorId(history?.colors[0]?.colorId ?? ''); } })
       .catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Unable to load history'); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -30,9 +29,10 @@ export default function ProductPriceHistoryExplorer({ productNo }: { productNo: 
   const current = selected ? latestObservation(selected) : null;
   const currentPrice = current?.salePrice ?? current?.originalPrice ?? null;
   const discounted = currentPrice != null && current?.originalPrice != null && currentPrice < current.originalPrice;
-  const points = useMemo(() => getPricePoints(product?.colors ?? [], selectedColorId, mode), [product, selectedColorId, mode]);
-  const availability = useMemo(() => selected ? getAvailabilityPoints(selected) : [], [selected]);
-  const low = getLowAnnotation(points);
+  const series = mode === 'product' ? product?.chartHistory.product : product?.chartHistory.colors[selectedColorId]?.price;
+  const points = series?.points ?? [];
+  const availability = product?.chartHistory.colors[selectedColorId]?.availability ?? [];
+  const low = series?.lowAnnotation;
   const trackingStart = product?.colors.flatMap(color => color.history.map(point => point.scrapedDate.slice(0, 10))).sort()[0];
   if (loading) return <Group justify="center" mih={360}><Loader /><Text>Loading price history</Text></Group>;
   if (error) return <Alert color="red" title="Price history could not load">{error}</Alert>;
@@ -61,14 +61,14 @@ export default function ProductPriceHistoryExplorer({ productNo }: { productNo: 
       <Stack gap="md">
         <Title order={2}>Price history</Title>
         <Group><Button aria-pressed={mode === 'selected'} variant={mode === 'selected' ? 'filled' : 'outline'} onClick={() => setMode('selected')}>Selected color</Button><Button aria-pressed={mode === 'product'} variant={mode === 'product' ? 'filled' : 'outline'} onClick={() => setMode('product')}>Product lowest available</Button></Group>
-        <Text id="price-method" size="sm" c="dimmed">Tracking started {trackingStart ?? 'date unavailable'}. {mode === 'selected' ? 'Latest daily observation for the selected color, including sold-out prices.' : 'Daily lowest price among colors with an available size in the same observation. Sold-out and unknown availability are excluded.'} Missing days remain gaps. Observed prices are in CAD and are not a complete retail price record.</Text>
-        <Box role="region" aria-label="Price history chart" aria-describedby="price-method" tabIndex={0}>
+        <Text id="price-method" size="sm" c="dimmed">Based on prices tracked since {trackingStart ?? 'date unavailable'}. {mode === 'selected' ? 'Daily price for the selected color when an available size was observed at the exact same time.' : 'Daily lowest price among colors with an available size in the same observation.'} Each UTC day uses the latest complete color observation. Sold-out and unknown availability are excluded. Missing days remain gaps. Prices are in CAD.</Text>
+        <Box role="region" aria-label="Price history chart" aria-describedby="price-method" tabIndex={0} mih={340}>
           {points.filter(point => point.y != null).length > 1 ? <PriceHistoryChart points={points} descriptionId="price-method" /> : <Text>Price history is still building</Text>}
         </Box>
         {low ? <Text size="sm">{low}</Text> : null}
         <Title order={2}>Availability history</Title>
         <Text id="availability-method" size="sm" c="dimmed">Available size count for {selected.colorName ?? selected.colorId} at each daily observation. Zero means sold out; missing stock data remains a gap. Use Tab to enter a chart and arrow keys to explore observations.</Text>
-        <Box role="region" aria-label="Availability history chart" aria-describedby="availability-method" tabIndex={0}>
+        <Box role="region" aria-label="Availability history chart" aria-describedby="availability-method" tabIndex={0} mih={260}>
           {availability.filter(point => point.y != null).length > 1 ? <AvailabilityHistoryChart points={availability} colorName={selected.colorName ?? selected.colorId} descriptionId="availability-method" /> : <Text>Availability history is still building</Text>}
         </Box>
       </Stack>

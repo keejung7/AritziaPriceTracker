@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "@mantine/charts/styles.css";
 import "./globals.css";
 import { theme } from './theme';
+import { editorialCssVariables } from './designTokens';
 
 export const metadata: Metadata = {
   title: "Aritzia Price Tracker",
@@ -13,7 +14,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" data-mantine-color-scheme="light" suppressHydrationWarning>
+    <html lang="en" data-mantine-color-scheme="light" style={editorialCssVariables as CSSProperties} suppressHydrationWarning>
       <body>
         <MantineProvider theme={theme} defaultColorScheme="light">{children}</MantineProvider>
       </body>
