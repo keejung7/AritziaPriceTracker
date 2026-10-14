@@ -1,0 +1,151 @@
+/** @jest-environment node */
+const { createCatalogTestDatabase } = require('./helpers/catalogTestDatabase');
+const { getCatalogProducts, parseCatalogQuery } = require('../app/services/catalogService');
+const { decodeCatalogCursor } = require('../app/services/catalogCursor');
+const { buildCatalogQuery } = require('../db/catalogQueries');
+describe('same-color catalog and snapshot pagination',()=>{
+  let db;
+  beforeAll(async()=>{ db=await createCatalogTestDatabase(); });
+  afterAll(async()=>{ await db?.close(); });
+  beforeEach(async()=>{
+    await db.query(`TRUNCATE aritzia_products.products,aritzia_products.colors,aritzia_products.catalog_snapshots RESTART IDENTITY CASCADE`);
+    await db.query(`INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of,activated_at) VALUES(1,'active',now(),now())`);
+    await db.query(`INSERT INTO aritzia_products.products(product_no,product_slug,product_full_url,product_name) SELECT n,n::text,'https://example.com/'||n,'Product '||n FROM generate_series(1,30) n`);
+    await db.query(`INSERT INTO aritzia_products.colors(color_id,color_name) VALUES('black','Black'),('red','Red')`);
+    await db.query(`INSERT INTO aritzia_products.product_colors(product_no,color_id) SELECT n,c FROM generate_series(1,30) n CROSS JOIN unnest(ARRAY['black','red']) c`);
+    await db.query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,original_price,sale_price,effective_price,sale_percent,available_sizes,availability_status,scraped_date)
+      SELECT 1,n,c,100,CASE WHEN c='red' THEN 50 END,CASE WHEN c='red' THEN 50 ELSE 80 END,CASE WHEN c='red' THEN 50 ELSE 0 END,
+      CASE WHEN c='red' THEN ARRAY['M'] ELSE ARRAY['S'] END,CASE WHEN n=30 THEN 'sold_out' ELSE 'available' END,now()
+      FROM generate_series(1,30) n CROSS JOIN unnest(ARRAY['black','red']) c`);
+    await db.query(`INSERT INTO aritzia_products.catalog_products(snapshot_id,product_no,product_name,product_brand,categories,from_color_id,from_price,from_original_price,from_sale_percent,availability_status)
+      SELECT 1,n,'Product '||n,'Brand',ARRAY['tops'],CASE WHEN n=30 THEN NULL ELSE 'red' END,CASE WHEN n=30 THEN NULL ELSE 50 END,CASE WHEN n=30 THEN NULL ELSE 100 END,CASE WHEN n=30 THEN NULL ELSE 50 END,CASE WHEN n=30 THEN 'sold_out' ELSE 'available' END FROM generate_series(1,30) n`);
+  });
+  const get=raw=>getCatalogProducts(parseCatalogQuery(new URLSearchParams(raw)),db.client);
+  test('catalog-wide named color IDs and observed size metadata stay bound to the resolved snapshot',async()=>{
+    await db.query(`INSERT INTO aritzia_products.colors(color_id,color_name) VALUES('1274','Black'),('3042','Black'),('18891','Brown');
+      INSERT INTO aritzia_products.product_colors(product_no,color_id) VALUES(1,'1274'),(2,'1274'),(1,'3042'),(2,'18891');
+      INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,color_name,effective_price,available_sizes,availability_status,scraped_date) VALUES
+      (1,1,'1274','Black',60,ARRAY['3XS','ONE','00','0'],'available',now()),
+      (1,2,'1274','Onyx',70,ARRAY['2','10'],'available',now()),
+      (1,1,'3042','Black',70,ARRAY['XS/S','M/L'],'available',now()),
+      (1,2,'18891',NULL,70,ARRAY['XS'],'available',now());`);
+    const first=await get('color=1274&size=ONE&limit=1');
+    expect(first.total).toBe(1);
+    expect(first.items[0].selectedColorId).toBe('1274');
+    expect(first.filterOptions.colors.filter(c=>/^\d+$/.test(c.id))).toEqual([{id:'18891',name:'18891'},{id:'1274',name:'Black'},{id:'3042',name:'Black'}]);
+    expect(first.filterOptions.sizes).toEqual(['3XS','XS','XS/S','S','M','M/L','00','0','2','10','ONE']);
+    const paging=await get('limit=2');
+    await db.query("UPDATE aritzia_products.catalog_snapshots SET status='inactive' WHERE snapshot_id=1; INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of,activated_at) VALUES(2,'active',now(),now()); INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of) VALUES(3,'failed',now())");
+    const retained=await get('limit=2&cursor='+paging.nextCursor);
+    expect(retained.snapshot).toMatchObject({id:'1',status:'stale'});
+    expect(retained.filterOptions).toEqual(paging.filterOptions);
+    const active=await get('');
+    expect(active.snapshot).toMatchObject({id:'2',status:'stale'});
+    expect(active.filterOptions).toEqual({colors:[],sizes:[]});
+  });
+  test('all predicates belong to one available color; size values are OR',async()=>{
+    expect((await get('color=black&saleOnly=true')).total).toBe(0);
+    expect((await get('size=S&saleOnly=true')).total).toBe(0);
+    expect((await get('size=S&size=M&saleOnly=true')).total).toBe(29);
+    expect((await get('color=black&maxPrice=60')).total).toBe(0);
+    expect((await get('minPrice=70&maxPrice=90')).items[0].selectedColorId).toBe('black');
+  });
+  test('global From metadata stays paired while filtered representative changes',async()=>{
+    const product=(await get('color=black')).items[0];
+    expect(product).toMatchObject({fromColorId:'red',fromPrice:50,fromOriginalPrice:100,fromSalePercent:50,selectedColorId:'black'});
+    expect(product.colors.find(c=>c.colorId==='black')).toMatchObject({effectivePrice:80,salePercent:0});
+    expect((await get('')).items[0].selectedColorId).toBe('red');
+    expect(product).not.toHaveProperty('history');
+  });
+  test('pages equal discounts without gaps, includes unavailable last and fetches colors only for page',async()=>{
+    const first=await get('');
+    expect(first.items).toHaveLength(24);
+    expect(first.items.flatMap(p=>p.colors)).toHaveLength(48);
+    expect(first.total).toBe(30);
+    const second=await get('cursor='+first.nextCursor);
+    expect([...first.items,...second.items].map(p=>p.productNo)).toEqual(Array.from({length:30},(_,i)=>String(i+1)));
+    expect(second.nextCursor).toBeNull();
+    expect(second.items.at(-1).availabilityStatus).toBe('sold_out');
+  });
+  test('cursor stays on retained snapshot and expires when removed',async()=>{
+    const first=await get('limit=2');
+    expect(decodeCatalogCursor(first.nextCursor,'discount-desc').snapshotId).toBe('1');
+    await db.query(`UPDATE aritzia_products.catalog_snapshots SET status='inactive' WHERE snapshot_id=1`);
+    await db.query(`INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of,activated_at) VALUES(2,'active',now(),now())`);
+    const second=await get('limit=2&cursor='+first.nextCursor);
+    expect(second.snapshot.id).toBe('1');
+    expect(second.items.map(p=>p.productNo)).toEqual(['3','4']);
+    await db.query(`DELETE FROM aritzia_products.catalog_snapshots WHERE snapshot_id=1`);
+    await expect(get('cursor='+first.nextCursor)).rejects.toMatchObject({code:'cursor_expired',status:400});
+  });
+  test('serves stale active snapshot after failed refresh and typed unavailable without snapshot',async()=>{
+    await db.query(`INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of) VALUES(2,'failed',now())`);
+    expect((await get('')).snapshot.status).toBe('stale');
+    await db.query(`DELETE FROM aritzia_products.catalog_snapshots`);
+    await expect(get('')).rejects.toMatchObject({code:'catalog_unavailable',status:503});
+  });
+  test.each(['price-asc','price-desc','observed-desc','name-asc'])('%s continuation handles ties and nulls',async sort=>{
+    let cursor=null, ids=[];
+    do {
+      const page=await get(`limit=7&sort=${sort}${cursor?'&cursor='+cursor:''}`);
+      ids.push(...page.items.map(p=>p.productNo)); cursor=page.nextCursor;
+    } while(cursor);
+    expect(ids).toHaveLength(30); expect(new Set(ids).size).toBe(30); expect(ids.at(-1)).toBe('30');
+  });
+  test('descending prices paginate differing values and ties before unavailable products',async()=>{
+    await db.query(`UPDATE aritzia_products.catalog_product_colors SET effective_price=CASE product_no WHEN 1 THEN 90 WHEN 2 THEN 70 WHEN 3 THEN 70 ELSE 20 END WHERE color_id='red'`);
+    const first=await get('limit=2&sort=price-desc');
+    expect(first.items.map(p=>p.productNo)).toEqual(['1','2']);
+    const second=await get('limit=2&sort=price-desc&cursor='+first.nextCursor);
+    expect(second.items.map(p=>p.productNo)).toEqual(['3','4']);
+  });
+  test('preserves bigint identifiers and six-digit UTC timestamps through continuation and expiry',async()=>{
+    const snapshot='9007199254740993';
+    const firstId='9007199254740993', secondId='9007199254740994';
+    const timestamp='2024-02-29T12:34:56.123456Z';
+    await db.query(`TRUNCATE aritzia_products.products,aritzia_products.colors,aritzia_products.catalog_snapshots RESTART IDENTITY CASCADE`);
+    await db.query(`INSERT INTO aritzia_products.catalog_snapshots(snapshot_id,status,data_as_of,activated_at)
+      VALUES($1,'active',$2::timestamptz,$2::timestamptz)`,[snapshot,timestamp]);
+    await db.query(`INSERT INTO aritzia_products.products(product_no,product_slug,product_full_url,product_name)
+      VALUES($1,$1::bigint::text,'https://example.com/first','First'),($2,$2::bigint::text,'https://example.com/second','Second')`,[firstId,secondId]);
+    await db.query(`INSERT INTO aritzia_products.colors(color_id,color_name) VALUES('red','Red')`);
+    await db.query(`INSERT INTO aritzia_products.product_colors(product_no,color_id) VALUES($1,'red'),($2,'red')`,[firstId,secondId]);
+    await db.query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,effective_price,sale_percent,available_sizes,availability_status,scraped_date)
+      VALUES($1,$2,'red',50,50,ARRAY['M'],'available',$4::timestamptz),($1,$3,'red',50,50,ARRAY['M'],'available',$4::timestamptz)`,[snapshot,firstId,secondId,timestamp]);
+    await db.query(`INSERT INTO aritzia_products.catalog_products(snapshot_id,product_no,product_name,from_color_id,availability_status,tracking_started_at)
+      VALUES($1,$2,'First','red','available',$4::timestamptz),($1,$3,'Second','red','available',$4::timestamptz)`,[snapshot,firstId,secondId,timestamp]);
+    const first=await get('limit=1&sort=observed-desc');
+    expect(first.snapshot).toMatchObject({id:snapshot,dataAsOf:timestamp,refreshedAt:timestamp});
+    expect(first.items[0]).toMatchObject({productNo:firstId,trackingStartedAt:timestamp});
+    expect(first.items[0].colors[0].scrapedDate).toBe(timestamp);
+    expect(decodeCatalogCursor(first.nextCursor,'observed-desc')).toMatchObject({snapshotId:snapshot,lastProductNo:firstId,lastSortValue:timestamp});
+    const second=await get(`limit=1&sort=observed-desc&cursor=${first.nextCursor}`);
+    expect(second.items.map(p=>p.productNo)).toEqual([secondId]);
+    expect(second.nextCursor).toBeNull();
+    await db.query(`DELETE FROM aritzia_products.catalog_snapshots WHERE snapshot_id=$1`,[snapshot]);
+    await expect(get(`sort=observed-desc&cursor=${first.nextCursor}`)).rejects.toMatchObject({code:'cursor_expired',status:400});
+  });
+  test('profiles default, combined variant filters, exact total, and continuation',async()=>{
+    // Increase cardinality without touching the raw observations or user schemas.
+    await db.query(`INSERT INTO aritzia_products.products(product_no,product_slug,product_full_url) SELECT n,n::text,n::text FROM generate_series(31,10000) n`);
+    await db.query(`INSERT INTO aritzia_products.product_colors(product_no,color_id) SELECT n,c FROM generate_series(31,10000) n CROSS JOIN unnest(ARRAY['black','red']) c`);
+    await db.query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,original_price,sale_price,effective_price,sale_percent,available_sizes,availability_status,scraped_date)
+      SELECT 1,n,c,100,50,50,50,ARRAY['M'],'available',now() FROM generate_series(31,10000) n CROSS JOIN unnest(ARRAY['black','red']) c`);
+    await db.query(`INSERT INTO aritzia_products.catalog_products(snapshot_id,product_no,product_name,from_color_id,from_price,from_original_price,from_sale_percent,availability_status)
+      SELECT 1,n,'Product '||n,'red',50,100,50,'available' FROM generate_series(31,10000) n`);
+    await db.query(`ANALYZE aritzia_products.catalog_products`);
+    await db.query(`ANALYZE aritzia_products.catalog_product_colors`);
+    const first=await get('');
+    const shapes={default:'',combined:'color=red&size=M&minPrice=40&maxPrice=60&saleOnly=true&minDiscount=20',continuation:'cursor='+first.nextCursor};
+    for(const [name,raw] of Object.entries(shapes)) {
+      const built=buildCatalogQuery(parseCatalogQuery(new URLSearchParams(raw)));
+      const plan=await db.query('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) '+built.text,built.values);
+      const root=plan.rows[0]['QUERY PLAN'][0];
+      expect(root.Plan['Actual Rows']).toBe(1);
+      if(process.env.CATALOG_EXPLAIN) console.info('CATALOG_EXPLAIN',name,JSON.stringify(root));
+    }
+    const total=await db.query(`EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) SELECT count(*) FROM aritzia_products.catalog_products WHERE snapshot_id=1`);
+    expect(total.rows[0]['QUERY PLAN'][0].Plan['Actual Rows']).toBe(1);
+    if(process.env.CATALOG_EXPLAIN) console.info('CATALOG_EXPLAIN exact-total',JSON.stringify(total.rows[0]['QUERY PLAN'][0]));
+  });
+});

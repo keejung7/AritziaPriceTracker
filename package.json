@@ -2,18 +2,42 @@
   "name": "aritzia-scraper",
   "version": "1.0.0",
   "dependencies": {
+    "@highcharts/react": "^5.4.0",
+    "@mantine/charts": "^9.3.2",
+    "@mantine/core": "^9.3.2",
+    "@mantine/hooks": "^9.3.2",
     "dotenv": "^17.4.2",
+    "highcharts": "^13.1.1",
+    "next": "^16.2.7",
     "pg": "^8.20.0",
     "playwright": "^1.40.0",
     "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "recharts": "^3.8.1"
   },
   "scripts": {
-    "start": "node run_pipeline.js",
-    "test": "jest --runInBand --watchman=false",
-    "pipeline": "node run_pipeline.js"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "pipeline": "node run_pipeline.js",
+    "refresh-catalog": "node db/refresh_catalog_read_model.js",
+    "test": "jest --runInBand --watchman=false --testPathIgnorePatterns=\\.integration\\.test\\.js$ --passWithNoTests",
+    "test:db": "jest --runInBand --watchman=false --testMatch='**/*.integration.test.js'",
+    "typecheck": "next typegen && tsc -p tsconfig.test.json --noEmit",
+    "test:e2e": "playwright test",
+    "profile:catalog": "node scripts/diagnostics/profile_catalog_queries.js"
   },
   "devDependencies": {
-    "jest": "^30.2.0"
+    "@playwright/test": "1.57.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/jest": "^30.0.0",
+    "@types/react": "19.2.16",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.5.2",
+    "typescript": "6.0.3"
   }
 }

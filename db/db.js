@@ -3,7 +3,7 @@ const dotenv = require("dotenv").config();
 const path = require("path");
 const { Pool } = pg;
 
-const parser = require("./parser.js");
+const { refreshCatalogReadModel } = require("./catalogReadModel.js");
 const {
   createDbLogger,
   formatCounts,
@@ -35,14 +35,16 @@ async function main() {
     process.argv[2] ||
     path.join(__dirname, "..", "product_details.jsonl");
 
-  logger.info(`Loading artifact: ${inputPath}`);
-  const products = parser.getProductDataForInsert();
+  const runId = path.basename(inputPath).match(/^product_details_(.+)\.jsonl$/)?.[1] ?? 'manual';
+  logger.info(`Loading artifact: ${inputPath} runId=${runId}`);
+  const products = require("./parser.js").getProductDataForInsert();
   const rows = collectRowsForInsert(products);
   logger.info(`Prepared: ${formatCounts(summarizeRows(rows))}`);
 
   logger.info("Starting transaction...");
   const affectedRows = await saveParsedProducts(pool, rows);
   logger.info(`Transaction committed: ${formatCounts(affectedRows)}`);
+  await refreshCatalogReadModel(pool);
 
   await pool.end();
   logger.info(
@@ -50,10 +52,12 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  logger.error(`Failed: ${error.message}`);
+if (require.main === module) main().catch((error) => {
+  logger.error(`Failed: ${error.message}\n${error.stack ?? ''}`);
   process.exit(1);
 });
+
+module.exports = { collectRowsForInsert, saveParsedProducts };
 
 async function saveParsedProducts(pool, rows) {
   const client = await pool.connect();
@@ -123,7 +127,7 @@ function collectRowsForInsert(products) {
   const categoriesBySlug = new Map();
   const productCategoryKeys = new Set();
   const colorsById = new Map();
-  const productColorKeys = new Set();
+  const productColorsByKey = new Map();
 
   for (const product of products) {
     productsByNo.set(product.product.product_no, product.product);
@@ -141,15 +145,23 @@ function collectRowsForInsert(products) {
     }
 
     for (const color of product.colors) {
-      colorsById.set(color.color_id, color);
+      const previous = colorsById.get(color.color_id);
+      // Artifact-order last non-null metadata wins; missing fields never erase
+      // an observed value, including when another product shares the color.
+      colorsById.set(color.color_id, {
+        ...color,
+        color_name: color.color_name ?? previous?.color_name ?? null,
+        swatch_image_url: color.swatch_image_url ?? previous?.swatch_image_url ?? null,
+      });
     }
 
     for (const productColor of product.productColors) {
       const key = `${productColor.color_id}:${productColor.product_no}`;
-      if (!productColorKeys.has(key)) {
-        productColorKeys.add(key);
-        rows.productColors.push(productColor);
-      }
+      const previous = productColorsByKey.get(key);
+      productColorsByKey.set(key, {
+        ...productColor,
+        product_color_image_url: productColor.product_color_image_url ?? previous?.product_color_image_url ?? null,
+      });
     }
 
     rows.priceSnapshots.push(...product.priceSnapshots);
@@ -159,6 +171,7 @@ function collectRowsForInsert(products) {
   rows.products = Array.from(productsByNo.values());
   rows.categories = Array.from(categoriesBySlug.values());
   rows.colors = Array.from(colorsById.values());
+  rows.productColors = Array.from(productColorsByKey.values());
 
   return rows;
 }

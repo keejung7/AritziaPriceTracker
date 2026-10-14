@@ -1,0 +1,45 @@
+html {
+  color-scheme: light;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background: var(--catalog-background);
+  color: var(--catalog-text);
+  font-family: var(--catalog-font-family);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+}
+
+.catalog-card { min-width: 0; font-size: 14px; line-height: 1.5; content-visibility: auto; contain-intrinsic-size: auto 680px; }
+.catalog-card p { margin: 8px 0; }
+.catalog-image { aspect-ratio: 3 / 4; background: var(--catalog-surface); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.catalog-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.catalog-muted { color: var(--catalog-muted); }
+.catalog-brand { color: var(--catalog-muted); font-size: 12px; font-weight: 500; }
+.catalog-product-name { font-size: 15px; font-weight: 500; line-height: 1.4; margin: 6px 0 10px; overflow-wrap: anywhere; }
+.catalog-product-name a { text-decoration: none; }
+.catalog-product-name a:hover { text-decoration: underline; }
+.catalog-price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; font-variant-numeric: tabular-nums; font-weight: 500; }
+.catalog-price del { color: var(--catalog-muted); font-size: 12px; font-weight: 400; }
+.catalog-discount { color: var(--catalog-accent); font-size: 12px; }
+.catalog-insight { color: var(--catalog-accent); font-size: 12px; font-weight: 500; }
+.catalog-selected-color { font-size: 13px; }
+.catalog-color-price { font-size: 13px; margin-bottom: 8px; }
+.catalog-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.catalog-swatch, .catalog-swatch-more { font: inherit; font-size: 10px; padding: 3px; width: 32px; height: 32px; border: 1px solid var(--catalog-border); background: var(--catalog-surface); color: var(--catalog-text); cursor: pointer; border-radius: 50%; }
+.catalog-swatch img { display: block; width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+.catalog-swatch[aria-pressed="true"] { border: 2px solid var(--catalog-accent); padding: 2px; }
+.catalog-swatch:focus-visible, .catalog-swatch-more:focus-visible, .catalog-product-name a:focus-visible { outline: 2px solid var(--catalog-accent); outline-offset: 3px; }
+.catalog-sizes { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; }
+.catalog-sizes .catalog-muted { flex-basis: 100%; }
+.catalog-filters { padding-bottom: 20px; border-bottom: 1px solid var(--catalog-border); }
+.mantine-Input-input { background-color: var(--catalog-surface); border-color: var(--catalog-border); color: var(--catalog-text); }
+.mantine-InputWrapper-label { font-weight: 500; }

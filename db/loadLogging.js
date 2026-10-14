@@ -1,13 +1,37 @@
+const fs = require("fs");
+const path = require("path");
+
 function createDbLogger({
   now = () => new Date(),
   info = console.info,
+  warn = console.warn,
   error = console.error,
+  logPath = process.env.DB_LOG_PATH,
 } = {}) {
   const format = (message) => `${now().toISOString()} [DB] ${message}`;
+  const writeToFile = logPath
+    ? (message) => {
+        fs.mkdirSync(path.dirname(logPath), { recursive: true });
+        fs.appendFileSync(logPath, `${message}\n`, "utf8");
+      }
+    : () => {};
 
   return {
-    info: (message) => info(format(message)),
-    error: (message) => error(format(message)),
+    info: (message) => {
+      const formatted = format(message);
+      info(formatted);
+      writeToFile(formatted);
+    },
+    error: (message) => {
+      const formatted = format(message);
+      error(formatted);
+      writeToFile(formatted);
+    },
+    warn: (message) => {
+      const formatted = format(message);
+      warn(formatted);
+      writeToFile(formatted);
+    },
   };
 }
 
