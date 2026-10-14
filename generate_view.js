@@ -1,7 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 
-const inputPath = path.join(__dirname, "product_details.jsonl");
+const filePath =
+  process.env.PRODUCT_DETAILS_PATH ||
+  process.argv[2] ||
+  path.join(__dirname, "..", "product_details.jsonl");
 const outputPath = path.join(__dirname, "view.html");
 
 (async () => {

@@ -1,5 +1,7 @@
 node_modules/
 .DS_Store
+.next/
+tsconfig.tsbuildinfo
 
 # Scraper Output
 *.csv
@@ -9,3 +11,8 @@ view.html
 
 # secrets
 .env
+
+# Reproducible browser/refresh validation output (keep timestamped run logs)
+test-results/
+playwright-report/
+.validation-artifacts/

@@ -1,7 +1,7 @@
-module.exports = {
-  testEnvironment: "node",
-  roots: ["<rootDir>/tests"],
-  testMatch: ["**/*.test.js"],
-  modulePathIgnorePatterns: ["<rootDir>/.next", "<rootDir>/.test-dist"],
-  clearMocks: true,
-};
+const nextJest = require('next/jest');
+
+module.exports = nextJest({ dir: './' })({
+  testEnvironment: 'jsdom',
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  testMatch: ['**/tests/**/*.test.[jt]s', '**/tests/**/*.test.tsx'],
+});
