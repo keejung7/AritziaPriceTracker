@@ -44,6 +44,10 @@ CREATE TABLE price_snapshots (
       REFERENCES product_colors (color_id, product_no)
 );
 
+CREATE INDEX price_snapshots_sale_product_color_date_idx
+ON price_snapshots (product_no, color_id, scraped_date DESC)
+WHERE sale_price IS NOT NULL;
+
 CREATE INDEX price_snapshots_product_color_date_idx
 ON price_snapshots (product_no, color_id, scraped_date DESC);
 
@@ -60,6 +64,15 @@ CREATE TABLE stock_snapshots (
     FOREIGN KEY (color_id, product_no)
       REFERENCES product_colors (color_id, product_no)
 );
+
+CREATE INDEX stock_snapshots_product_color_size_date_idx
+ON stock_snapshots (
+    product_no,
+    color_id,
+    product_size,
+    scraped_date DESC
+)
+INCLUDE (product_status);
 
 -- Catalog snapshot read model.
 CREATE TABLE catalog_snapshots (
