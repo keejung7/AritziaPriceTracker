@@ -2,6 +2,7 @@ node_modules/
 .DS_Store
 .next/
 tsconfig.tsbuildinfo
+next-env.d.ts
 
 # Scraper Output
 *.csv
