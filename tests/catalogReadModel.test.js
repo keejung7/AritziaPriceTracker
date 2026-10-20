@@ -30,6 +30,18 @@ test('locks and applies timeout within transaction, validates before publication
   expect(Object.keys(result.queryDurationsMs)).toHaveLength(8);
   expect(result.totalDurationMs).toBeGreaterThanOrEqual(0);
 });
+test('derivations summarize each stock observation once instead of running correlated stock probes', async () => {
+  const f = fixture();
+  await refreshCatalogReadModel(f.pool, { logger: f.logger });
+  const derivations = f.queries.filter(sql => sql.includes('WITH stock_observations'));
+  expect(derivations).toHaveLength(3);
+  for (const sql of derivations) {
+    expect(sql.match(/FROM aritzia_products\.stock_snapshots/g)).toHaveLength(1);
+    expect(sql).not.toContain('AND EXISTS (SELECT 1 FROM aritzia_products.stock_snapshots');
+  }
+  const allTimeUpdate = f.queries.find(sql => sql.includes('/* derive_all_time_lows */'));
+  expect(allTimeUpdate).toContain('lows AS MATERIALIZED');
+});
 test('history loss in the overlapping rolling window prevents publication independently of product counts', async () => {
   const f=fixture({previousHistory:10,comparableHistory:2});
   await expect(refreshCatalogReadModel(f.pool,{logger:f.logger})).rejects.toThrow('Severe history count regression: 10 -> 2');
