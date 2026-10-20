@@ -12,19 +12,21 @@ const DISCOUNT_PERCENT = `CASE WHEN p.original_price>0
   THEN round((1-COALESCE(p.sale_price,p.original_price)/p.original_price)*100) END`;
 // Choose the latest complete color observation before eligibility and price ranking.
 // Reuse the same daily series for chart points, all low labels, and validation.
-const DAILY_SERIES = `WITH daily_colors AS (
+const DAILY_SERIES = `WITH stock_observations AS MATERIALIZED (
+  SELECT product_no,color_id,scraped_date,
+    bool_or(${AVAILABLE}) AS has_available
+  FROM aritzia_products.stock_snapshots
+  GROUP BY product_no,color_id,scraped_date
+), daily_colors AS (
   SELECT DISTINCT ON (p.product_no,p.color_id,(p.scraped_date AT TIME ZONE 'UTC')::date)
-    p.*, (p.scraped_date AT TIME ZONE 'UTC')::date AS observation_date
+    p.*, (p.scraped_date AT TIME ZONE 'UTC')::date AS observation_date,s.has_available
   FROM aritzia_products.price_snapshots p
-  WHERE EXISTS (SELECT 1 FROM aritzia_products.stock_snapshots s WHERE s.product_no=p.product_no
-    AND s.color_id=p.color_id AND s.scraped_date=p.scraped_date)
+  JOIN stock_observations s USING(product_no,color_id,scraped_date)
   ORDER BY p.product_no,p.color_id,(p.scraped_date AT TIME ZONE 'UTC')::date,p.scraped_date DESC
 ), eligible_daily_colors AS (
   SELECT p.product_no,p.color_id,p.original_price,p.sale_price,p.scraped_date,p.observation_date,
     ${DISCOUNT_PERCENT} AS sale_percent,COALESCE(p.sale_price,p.original_price) AS effective_price FROM daily_colors p
-  WHERE COALESCE(p.sale_price,p.original_price) IS NOT NULL
-    AND EXISTS (SELECT 1 FROM aritzia_products.stock_snapshots s WHERE s.product_no=p.product_no
-      AND s.color_id=p.color_id AND s.scraped_date=p.scraped_date AND ${AVAILABLE})
+  WHERE COALESCE(p.sale_price,p.original_price) IS NOT NULL AND p.has_available
 ), daily_products AS (
   SELECT DISTINCT ON (product_no,observation_date) * FROM eligible_daily_colors
   ORDER BY product_no,observation_date,effective_price,color_id
@@ -105,7 +107,7 @@ async function refreshCatalogReadModel(pool, options = {}) {
       SELECT $1, product_no, observation_date, effective_price, original_price, sale_percent, color_id
       FROM daily_products
       WHERE observation_date >= ($2::timestamptz AT TIME ZONE 'UTC')::date-($3::integer-1)`, [snapshotId,dataAsOf,historyDays]);
-    await run('derive_all_time_lows', `${DAILY_SERIES}, lows AS (
+    await run('derive_all_time_lows', `${DAILY_SERIES}, lows AS MATERIALIZED (
       SELECT p.product_no, min(effective_price) AS ever,
         min(effective_price) FILTER (WHERE observation_date >= ($2::timestamptz AT TIME ZONE 'UTC')::date-89) AS days90,
         min(effective_price) FILTER (WHERE observation_date >= ($2::timestamptz AT TIME ZONE 'UTC')::date-29) AS days30
