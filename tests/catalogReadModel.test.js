@@ -42,6 +42,13 @@ test('derivations summarize each stock observation once instead of running corre
   const allTimeUpdate = f.queries.find(sql => sql.includes('/* derive_all_time_lows */'));
   expect(allTimeUpdate).toContain('lows AS MATERIALIZED');
 });
+test('all-time-low labels require an earlier comparable daily observation', async () => {
+  const f = fixture();
+  await refreshCatalogReadModel(f.pool, { logger: f.logger });
+  const allTimeUpdate = f.queries.find(sql => sql.includes('/* derive_all_time_lows */'));
+  expect(allTimeUpdate).toContain('count(*) AS comparable_observations');
+  expect(allTimeUpdate).toMatch(/SET insight_label=CASE\s+WHEN lows\.comparable_observations>1 THEN CASE/);
+});
 test('history loss in the overlapping rolling window prevents publication independently of product counts', async () => {
   const f=fixture({previousHistory:10,comparableHistory:2});
   await expect(refreshCatalogReadModel(f.pool,{logger:f.logger})).rejects.toThrow('Severe history count regression: 10 -> 2');
