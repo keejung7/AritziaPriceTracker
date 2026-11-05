@@ -1,49 +1,52 @@
 name: Daily Aritzia Scrape
 
 on:
-  workflow_dispatch: # Allows you to click a button to run it manually
+  workflow_dispatch:
   schedule:
-    - cron: '0 13 * * *' # Runs every day at 13:00 UTC
+    - cron: '0 13 * * *'
 
 permissions:
   contents: write
 
+concurrency:
+  group: daily-aritzia-scrape
+  cancel-in-progress: false
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # 6 hours max execution time
+    timeout-minutes: 360
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb
-        npm ci
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Install Playwright Browsers
-      run: npx playwright install --with-deps chromium
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
 
-    - name: Run Scraper Pipeline
-      env:
-        CI: true
-      run: |
-        xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" node scraper.js
-        xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" node details_scraper.js
-        node generate_view.js
+      - name: Run scraper pipeline
+        env:
+          CI: 'true'
+          HEADLESS: 'true'
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run pipeline
 
-    - name: Commit and Push results
-      run: |
-        git config --global user.name 'GitHub Actions Bot'
-        git config --global user.email 'actions@github.com'
-        git add -f product_links.csv product_details.jsonl view.html
-        git commit -m "Update scraped data $(date +'%Y-%m-%d')" || exit 0
-        git push
+      - name: Commit generated artifacts
+        run: |
+          git config user.name 'GitHub Actions Bot'
+          git config user.email 'actions@github.com'
+          git add -f data/
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Update scraped data $(date -u +'%Y-%m-%d')"
+          git push
