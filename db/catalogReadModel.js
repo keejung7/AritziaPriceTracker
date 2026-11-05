@@ -108,15 +108,17 @@ async function refreshCatalogReadModel(pool, options = {}) {
       FROM daily_products
       WHERE observation_date >= ($2::timestamptz AT TIME ZONE 'UTC')::date-($3::integer-1)`, [snapshotId,dataAsOf,historyDays]);
     await run('derive_all_time_lows', `${DAILY_SERIES}, lows AS MATERIALIZED (
-      SELECT p.product_no, min(effective_price) AS ever,
+      SELECT p.product_no, count(*) AS comparable_observations, min(effective_price) AS ever,
         min(effective_price) FILTER (WHERE observation_date >= ($2::timestamptz AT TIME ZONE 'UTC')::date-89) AS days90,
         min(effective_price) FILTER (WHERE observation_date >= ($2::timestamptz AT TIME ZONE 'UTC')::date-29) AS days30
       FROM daily_products p
       GROUP BY p.product_no)
       UPDATE aritzia_products.catalog_products c SET insight_label=CASE
-        WHEN c.from_price<=lows.ever THEN 'Lowest ever'
-        WHEN c.from_price<=lows.days90 THEN 'Lowest in 90 days'
-        WHEN c.from_price<=lows.days30 THEN 'Lowest in 30 days' END
+        WHEN lows.comparable_observations>1 THEN CASE
+          WHEN c.from_price<=lows.ever THEN 'Lowest ever'
+          WHEN c.from_price<=lows.days90 THEN 'Lowest in 90 days'
+          WHEN c.from_price<=lows.days30 THEN 'Lowest in 30 days' END
+        END
       FROM lows WHERE c.snapshot_id=$1 AND c.product_no=lows.product_no`, [snapshotId,dataAsOf]);
     const countsResult = await run('validate_counts', `${DAILY_SERIES}, history_overlap AS (
       SELECT GREATEST(($2::timestamptz AT TIME ZONE 'UTC')::date-($3::integer-1),min(h.observation_date)) AS first_date,

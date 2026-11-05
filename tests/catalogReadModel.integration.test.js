@@ -92,6 +92,12 @@ describe('atomic catalog derivation in an isolated schema', () => {
     expect(log).toContain('statementTimeoutMs=120000');
     expect(log).toContain('cleanup removedSnapshots=0 retainedNonActive=2');
   });
+  test('does not label a product with only its current comparable observation', async () => {
+    await observe(14,'a',10,'2026-10-13T12:00Z',['Available']);
+    const refreshed = await refreshCatalogReadModel(scopedPool,{ logger:logger() });
+    expect((await query(`SELECT insight_label FROM aritzia_products.catalog_products WHERE snapshot_id=$1 AND product_no=14`,[refreshed.snapshotId])).rows)
+      .toEqual([{ insight_label:null }]);
+  });
   test('rolling history expiry is allowed but loss within the comparable window fails', async () => {
     await observe(1,'a',50,'2026-10-11T12:00Z',['In Stock']);
     await observe(1,'a',50,'2026-10-12T12:00Z',['In Stock']);
