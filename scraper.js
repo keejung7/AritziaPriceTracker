@@ -3,6 +3,11 @@ const stealth = require("puppeteer-extra-plugin-stealth");
 const fs = require("fs");
 const path = require("path");
 const logger = require("./logError");
+const {
+  captureCiDiagnostics,
+  startCiTracing,
+  stopCiTracing,
+} = require("./scraperDiagnostics");
 
 const BROWSER_CLOSE_TIMEOUT_MS = 15000;
 const HEADLESS = process.env.HEADLESS !== "false";
@@ -18,6 +23,10 @@ chromium.use(stealth());
   });
   const context = await browser.newContext();
   const page = await context.newPage();
+  const diagnosticsDir = process.env.SCRAPER_DIAGNOSTICS_DIR ||
+    path.join(__dirname, ".validation-artifacts", "scraper-diagnostics");
+
+  await startCiTracing(context);
 
   logger.setLogFile(path.join(__dirname, "scraper.log"));
 
@@ -30,14 +39,29 @@ chromium.use(stealth());
 
   try {
     logger.emit("info", "Navigating to Aritzia to find categories...");
-    await page.goto("https://www.aritzia.com/en/clothing", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000, // Increased timeout for larger initial load
-    });
+    try {
+      await page.goto("https://www.aritzia.com/en/clothing", {
+        waitUntil: "domcontentloaded",
+        timeout: 60000, // Increased timeout for larger initial load
+      });
 
-    // Wait for the category elements to render to avoid getting 0 results
-    logger.emit("info", "Waiting for categories to load...");
-    await page.waitForSelector('a[data-testid="swiper-item"]');
+      // Wait for the category elements to render to avoid getting 0 results
+      logger.emit("info", "Waiting for categories to load...");
+      await page.waitForSelector('a[data-testid="swiper-item"]');
+      await stopCiTracing(context);
+    } catch (error) {
+      try {
+        await captureCiDiagnostics({
+          context,
+          page,
+          outputDir: diagnosticsDir,
+          failure: error,
+        });
+      } catch (diagnosticError) {
+        logger.emit("warn", "Failed to capture CI diagnostics:", diagnosticError);
+      }
+      throw error;
+    }
 
     // Extract subcategory links
     const categoryLinks = await page.evaluate(() => {
@@ -118,6 +142,7 @@ chromium.use(stealth());
     logger.emit("info", "Links saved to product_links.csv");
   } catch (error) {
     logger.emit("error", "Error during scraping:", error);
+    process.exitCode = 1;
   } finally {
     logger.emit("info", "Closing browser...");
     const browserClosed = await closeBrowserWithTimeout(browser);
@@ -128,7 +153,7 @@ chromium.use(stealth());
         "warn",
         `Browser close timed out after ${BROWSER_CLOSE_TIMEOUT_MS}ms; exiting after outputs were saved.`,
       );
-      process.exit(0);
+      process.exitCode = 1;
     }
   }
 })();
