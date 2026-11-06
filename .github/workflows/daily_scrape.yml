@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   scrape:
+    # Playwright 1.65 does supports Ubuntu 26.04, which `ubuntu-latest`
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
