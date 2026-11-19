@@ -207,7 +207,8 @@ function getCloudinarySizedImageUrl(url, width, height) {
   } catch (error) {
     logger.emit("error", `Error reading input file: ${inputCsvPath}`);
     logger.emit("error", error.message);
-    return; // Exit if we can't read the links
+    process.exitCode = 1;
+    return;
   }
 
   // Create a write stream. flags: 'w' overwrites the file (starts fresh).
@@ -274,6 +275,7 @@ function getCloudinarySizedImageUrl(url, width, height) {
           .innerText()
           .catch(() => null);
         const colorMap = new Map();
+        const productIssues = [];
         const swatches = await swatchLocator.evaluateAll((buttons) =>
           buttons.map((button) => {
             const images = Array.from(button.querySelectorAll("img"));
@@ -309,6 +311,7 @@ function getCloudinarySizedImageUrl(url, width, height) {
             const { colorText, hasIndicator, swatchImageUrl } = swatchInfo;
 
             if (!colorText) {
+              productIssues.push('SWATCH_UNIDENTIFIED');
               continue;
             }
 
@@ -365,14 +368,20 @@ function getCloudinarySizedImageUrl(url, width, height) {
                 "warn",
                 `Skipping swatch ${colorText} for ${url} - ${selectionError.message}`,
               );
+              productIssues.push('SWATCH_SELECTION_FAILED');
               continue;
             }
 
             // Extract Prices
-            const originalPriceText = await page
-              .locator('[data-testid="product-list-price-text"]')
-              .innerText()
-              .catch(() => NotAvailable);
+            let originalPriceText = NotAvailable;
+            for (let priceAttempt = 1; priceAttempt <= 2; priceAttempt++) {
+              originalPriceText = await page
+                .locator('[data-testid="product-list-price-text"]')
+                .innerText({ timeout: SIZE_UI_TIMEOUT_MS })
+                .catch(() => NotAvailable);
+              if (originalPriceText !== NotAvailable) break;
+              if (priceAttempt === 1) await delay(RETRY_DELAY_MS);
+            }
 
             let salePriceText = NotAvailable;
 
@@ -416,19 +425,24 @@ function getCloudinarySizedImageUrl(url, width, height) {
             const hasSizeDropdown = (await sizeDropdown.count()) > 0;
 
             let sizes = [];
+            const colorIssues = [];
+            if (originalPriceText === NotAvailable) colorIssues.push('PRICE_MISSING');
+            let sizeOutcome = 'unknown';
             if (hasSizeDropdown) {
               try {
                 sizes = await extractSizesFromDropdown(page, {
                   uiTimeoutMs: SIZE_UI_TIMEOUT_MS,
                   optionTimeoutMs: SIZE_OPTIONS_TIMEOUT_MS,
                 });
+                sizeOutcome = 'observed';
               } catch (sizeError) {
+                colorIssues.push('SIZE_EXTRACTION_FAILED');
                 logger.emit(
                   "warn",
                   `Skipping size extraction for ${url} - ${sizeError.message}`,
                 );
               }
-            }
+            } else colorIssues.push('SIZE_DROPDOWN_MISSING');
 
             const colorCode = getColorCodeFromUrl(page.url());
             const productColorImageUrl = await getProductColorImageUrl(
@@ -444,6 +458,8 @@ function getCloudinarySizedImageUrl(url, width, height) {
                 sale_price: salePriceText,
                 sale_percent: salePercent,
                 sizes,
+                size_outcome: sizeOutcome,
+                issues: colorIssues,
               });
             }
           }
@@ -456,6 +472,7 @@ function getCloudinarySizedImageUrl(url, width, height) {
           product_brand: brand,
           scraped_at: new Date().toISOString(),
           colors: Array.from(colorMap, ([key, value]) => ({ [key]: value })),
+          issues: [...new Set([...productIssues, ...(!name ? ['PRODUCT_NAME_MISSING'] : []), ...(!colorMap.size ? ['PRODUCT_COLORS_MISSING'] : [])])],
         };
 
         // Write to stream (much faster than appendFileSync)
@@ -473,6 +490,7 @@ function getCloudinarySizedImageUrl(url, width, height) {
             source_categories,
             scraped_at: new Date().toISOString(),
             colors: [],
+            issues: ['PRODUCT_SCRAPE_FAILED', 'PRODUCT_COLORS_MISSING'],
           };
           outputStream.write(JSON.stringify(productData) + "\n");
         }

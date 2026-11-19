@@ -80,10 +80,11 @@ chromium.use(stealth());
     logger.emit("info", `Found ${uniqueCategories.length} subcategories.`);
 
     const productCategoriesByUrl = new Map();
+    const categoryOutcomes = [];
 
     for (const categoryUrl of uniqueCategories) {
       logger.emit("info", `Navigating to category: ${categoryUrl}`);
-      try {
+      for (let attempt = 1; attempt <= 2; attempt++) try {
         const category = getCategorySlug(categoryUrl);
         // Append ?lastViewed=300 to try and load all items in this category at once
         const urlWithParams = categoryUrl.includes("?")
@@ -116,9 +117,18 @@ chromium.use(stealth());
           "info",
           `Total unique products so far: ${productCategoriesByUrl.size}`,
         );
+        categoryOutcomes.push({ url: categoryUrl, complete: true, products: productLinks.length });
+        break;
       } catch (e) {
-        logger.emit("error", `Failed to scrape category ${categoryUrl}:`, e);
+        logger.emit(attempt === 2 ? "error" : "warn", `Failed to scrape category ${categoryUrl} (attempt ${attempt}): ${e.message}`);
+        if (attempt === 2) categoryOutcomes.push({ url: categoryUrl, complete: false, error: e.message });
+        else await page.waitForTimeout(2000);
       }
+    }
+
+    if (process.env.DISCOVERY_PATH) {
+      fs.mkdirSync(path.dirname(process.env.DISCOVERY_PATH), { recursive: true });
+      fs.writeFileSync(process.env.DISCOVERY_PATH, JSON.stringify({ complete: categoryOutcomes.length === uniqueCategories.length && categoryOutcomes.every(item => item.complete), categories: categoryOutcomes }, null, 2));
     }
 
     // Save links to CSV

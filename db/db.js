@@ -11,6 +11,7 @@ const {
 } = require("./loadLogging.js");
 const MAX_BATCH_PARAMS = 5000;
 const logger = createDbLogger();
+const { validateRun } = require("../validateRun");
 
 const pool = new Pool(
   process.env.DATABASE_URL
@@ -34,6 +35,13 @@ async function main() {
     process.env.PRODUCT_DETAILS_PATH ||
     process.argv[2] ||
     path.join(__dirname, "..", "product_details.jsonl");
+
+  const reportPath = process.env.VALIDATION_PATH;
+  const linksPath = process.env.PRODUCT_LINKS_PATH;
+  if (!reportPath || !linksPath) throw new Error("VALIDATION_PATH and PRODUCT_LINKS_PATH are required for ingestion");
+  const report = validateRun({ linksPath, detailsPath: inputPath, reportPath, discoveryPath: process.env.DISCOVERY_PATH });
+  logger.info(`Validation ${report.status}: links=${report.links} products=${report.products} findings=${report.findings.length} report=${reportPath}`);
+  if (report.status !== "passed") throw new Error(`Artifact validation blocked database load: ${reportPath}`);
 
   const runId = path.basename(inputPath).match(/^product_details_(.+)\.jsonl$/)?.[1] ?? 'manual';
   logger.info(`Loading artifact: ${inputPath} runId=${runId}`);
