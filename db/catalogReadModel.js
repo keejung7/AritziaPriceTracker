@@ -34,11 +34,15 @@ const DAILY_SERIES = `WITH stock_observations AS MATERIALIZED (
 
 async function refreshCatalogReadModel(pool, options = {}) {
   const { historyDays, statementTimeoutMs, warningRegressionRatio,
-    failureRegressionRatio, retainedSnapshots, logger = createDbLogger() } = { ...DEFAULTS, ...options };
+    failureRegressionRatio, retainedSnapshots, logger = createDbLogger(), excludedProductNos = [] } = { ...DEFAULTS, ...options };
   if (!Number.isInteger(historyDays) || historyDays < 1 || historyDays > 90) throw new Error('historyDays must be between 1 and 90');
   if (!Number.isInteger(statementTimeoutMs) || statementTimeoutMs < 1) throw new Error('statementTimeoutMs must be positive');
   if (!Number.isInteger(retainedSnapshots) || retainedSnapshots < 0) throw new Error('retainedSnapshots must be nonnegative');
   if (!(failureRegressionRatio >= 0 && failureRegressionRatio <= warningRegressionRatio && warningRegressionRatio <= 1)) throw new Error('Invalid regression ratios');
+  if (!Array.isArray(excludedProductNos) || excludedProductNos.some(productNo => !Number.isInteger(productNo))) {
+    throw new Error('excludedProductNos must contain only integers');
+  }
+  const excluded = [...new Set(excludedProductNos)];
   const started = performance.now();
   const attemptStartedAt = new Date();
   const queryDurationsMs = {};
@@ -83,7 +87,8 @@ async function refreshCatalogReadModel(pool, options = {}) {
         bool_and(COALESCE(${SOLD_OUT}, false)) AS all_sold_out,
         array_agg(product_size ORDER BY product_size) FILTER (WHERE ${AVAILABLE}) AS sizes
         FROM aritzia_products.stock_snapshots s WHERE s.product_no=p.product_no
-          AND s.color_id=p.color_id AND s.scraped_date=p.scraped_date) s ON true`, [snapshotId]);
+          AND s.color_id=p.color_id AND s.scraped_date=p.scraped_date) s ON true
+      WHERE NOT (p.product_no = ANY($2::bigint[]))`, [snapshotId,excluded]);
     await run('derive_products', `INSERT INTO aritzia_products.catalog_products
       (snapshot_id, product_no, product_slug, product_full_url, product_name, product_brand,
        categories, from_color_id, from_price, from_original_price, from_sale_percent,

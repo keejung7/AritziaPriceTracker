@@ -39,20 +39,16 @@ async function main() {
   const reportPath = process.env.VALIDATION_PATH;
   const linksPath = process.env.PRODUCT_LINKS_PATH;
   if (!reportPath || !linksPath) throw new Error("VALIDATION_PATH and PRODUCT_LINKS_PATH are required for ingestion");
-  const report = validateRun({ linksPath, detailsPath: inputPath, reportPath, discoveryPath: process.env.DISCOVERY_PATH });
-  logger.info(`Validation ${report.status}: links=${report.links} products=${report.products} findings=${report.findings.length} report=${reportPath}`);
-  if (report.status !== "passed") throw new Error(`Artifact validation blocked database load: ${reportPath}`);
-
-  const runId = path.basename(inputPath).match(/^product_details_(.+)\.jsonl$/)?.[1] ?? 'manual';
-  logger.info(`Loading artifact: ${inputPath} runId=${runId}`);
-  const products = require("./parser.js").getProductDataForInsert();
-  const rows = collectRowsForInsert(products);
-  logger.info(`Prepared: ${formatCounts(summarizeRows(rows))}`);
-
-  logger.info("Starting transaction...");
-  const affectedRows = await saveParsedProducts(pool, rows);
-  logger.info(`Transaction committed: ${formatCounts(affectedRows)}`);
-  await refreshCatalogReadModel(pool);
+  await loadValidatedArtifact({
+    pool,
+    inputPath,
+    linksPath,
+    reportPath,
+    discoveryPath: process.env.DISCOVERY_PATH,
+    acceptedPath: process.env.ACCEPTED_DETAILS_PATH,
+    quarantinePath: process.env.QUARANTINE_DETAILS_PATH,
+    logger,
+  });
 
   await pool.end();
   logger.info(
@@ -65,7 +61,46 @@ if (require.main === module) main().catch((error) => {
   process.exit(1);
 });
 
-module.exports = { collectRowsForInsert, saveParsedProducts };
+async function loadValidatedArtifact({
+  pool,
+  inputPath,
+  linksPath,
+  reportPath,
+  discoveryPath,
+  acceptedPath,
+  quarantinePath,
+  logger: runLogger = logger,
+  validate = validateRun,
+  parse = require("./parser.js").getProductDataForInsert,
+  collect = collectRowsForInsert,
+  save = saveParsedProducts,
+  refresh = refreshCatalogReadModel,
+}) {
+  const report = validate({
+    linksPath,
+    detailsPath: inputPath,
+    reportPath,
+    discoveryPath,
+    acceptedPath,
+    quarantinePath,
+  });
+  runLogger.info(`Validation ${report.status}: links=${report.links} products=${report.products} accepted=${report.acceptedProducts} quarantined=${report.quarantinedProducts} findings=${report.findings.length} report=${reportPath}`);
+  if (report.status === "blocked") throw new Error(`Artifact validation blocked database load: ${reportPath}`);
+
+  const runId = path.basename(inputPath).match(/^product_details_(.+)\.jsonl$/)?.[1] ?? 'manual';
+  const loadPath = report.acceptedPath || inputPath;
+  runLogger.info(`Loading artifact: ${loadPath} runId=${runId}`);
+  const products = parse(loadPath);
+  const rows = collect(products);
+  runLogger.info(`Prepared: ${formatCounts(summarizeRows(rows))}`);
+  runLogger.info("Starting transaction...");
+  const affectedRows = await save(pool, rows);
+  runLogger.info(`Transaction committed: ${formatCounts(affectedRows)}`);
+  const catalog = await refresh(pool, { excludedProductNos: report.quarantinedProductNos });
+  return { report, affectedRows, catalog };
+}
+
+module.exports = { collectRowsForInsert, saveParsedProducts, loadValidatedArtifact };
 
 async function saveParsedProducts(pool, rows) {
   const client = await pool.connect();

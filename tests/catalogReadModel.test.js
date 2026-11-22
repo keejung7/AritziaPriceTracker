@@ -3,11 +3,13 @@ const { refreshCatalogReadModel } = require('../db/catalogReadModel');
 
 function fixture({ failStage, failMarker = false, previous = 10, current = 10, previousHistory = 10, comparableHistory = 10 } = {}) {
   const queries = [];
+  const calls = [];
   const logger = { info: jest.fn(), error: jest.fn(), warn: jest.fn() };
   const client = {
     release: jest.fn(),
     async query(sql, values) {
       queries.push(sql);
+      calls.push({ sql, values });
       if (failMarker && sql.includes('/* record_failure */')) throw new Error('marker persistence failed');
       if (failStage && sql.includes(`/* ${failStage} */`)) throw new Error('injected failure');
       if (sql.includes('/* create_snapshot */')) return { rows: [{ snapshot_id: '2', data_as_of: new Date('2026-10-13') }] };
@@ -15,7 +17,7 @@ function fixture({ failStage, failMarker = false, previous = 10, current = 10, p
       return { rows: [], rowCount: current };
     },
   };
-  return { pool: { connect: async () => client }, queries, logger, client };
+  return { pool: { connect: async () => client }, queries, calls, logger, client };
 }
 
 test('locks and applies timeout within transaction, validates before publication and returns timings', async () => {
@@ -92,4 +94,12 @@ test('warning count regression logs and publishes', async () => {
   await refreshCatalogReadModel(f.pool, { logger: f.logger, warningRegressionRatio: 0.9, failureRegressionRatio: 0.5 });
   expect(f.logger.warn).toHaveBeenCalled();
   expect(f.queries.at(-1)).toBe('COMMIT');
+});
+
+test('excludes quarantined product numbers from the published catalog snapshot', async () => {
+  const f = fixture();
+  await refreshCatalogReadModel(f.pool, { logger: f.logger, excludedProductNos: [456, 789] });
+  const deriveColors = f.calls.find(call => call.sql.includes('/* derive_current_colors */'));
+  expect(deriveColors.sql).toContain('NOT (p.product_no = ANY($2::bigint[]))');
+  expect(deriveColors.values).toEqual(['2', [456, 789]]);
 });

@@ -72,6 +72,11 @@ function checkProduct(product, addFinding) {
   }
 }
 
+function productNoFromUrl(url) {
+  const match = String(url || '').match(/\/(\d+)\.html$/);
+  return match ? Number(match[1]) : null;
+}
+
 function checkCoverage(links, products, addFinding) {
   const expected = new Set(links);
   if (expected.size !== links.length) addFinding('DUPLICATE_LINK', 'run');
@@ -82,7 +87,6 @@ function checkCoverage(links, products, addFinding) {
     if (!url || seen.has(url)) addFinding('DUPLICATE_OR_MISSING_PRODUCT', url || 'unknown');
     seen.add(url);
     if (!expected.has(url)) addFinding('UNEXPECTED_PRODUCT', url || 'unknown');
-    checkProduct(product, addFinding);
   }
   for (const url of expected) {
     if (!seen.has(url)) addFinding('DETAIL_MISSING', url);
@@ -96,21 +100,70 @@ function writeReport(reportPath, report) {
   fs.renameSync(temporary, reportPath);
 }
 
-function validateRun({ linksPath, detailsPath, reportPath, discoveryPath }) {
+function writeJsonLines(filePath, products) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${process.pid}.tmp`;
+  const content = products.length ? `${products.map(product => JSON.stringify(product)).join('\n')}\n` : '';
+  fs.writeFileSync(temporary, content);
+  fs.renameSync(temporary, filePath);
+}
+
+function artifactPaths(reportPath, acceptedPath, quarantinePath) {
+  const directory = path.dirname(reportPath);
+  const suffix = path.basename(reportPath).replace(/^validation_/, '').replace(/\.json$/, '');
+  return {
+    acceptedPath: acceptedPath || path.join(directory, `accepted_product_details_${suffix}.jsonl`),
+    quarantinePath: quarantinePath || path.join(directory, `quarantine_product_details_${suffix}.jsonl`),
+  };
+}
+
+function validateRun({ linksPath, detailsPath, reportPath, discoveryPath, acceptedPath, quarantinePath }) {
   const findings = [];
-  const addFinding = (code, scope, detail) => findings.push({ code, scope, detail });
+  const findingKeys = new Set();
+  const addFinding = (code, scope, detail) => {
+    const key = `${code}\u0000${scope}`;
+    if (findingKeys.has(key)) return;
+    findingKeys.add(key);
+    findings.push({ code, scope, ...(detail ? { detail } : {}) });
+  };
 
   const links = readLinks(linksPath, addFinding);
   const products = readProducts(detailsPath, addFinding);
   checkDiscovery(discoveryPath, addFinding);
   checkCoverage(links, products, addFinding);
 
+  const structuralFindingCount = findings.length;
+  const accepted = [];
+  const quarantined = [];
+  for (const product of products) {
+    const before = findings.length;
+    checkProduct(product, addFinding);
+    if (findings.length === before) accepted.push(product);
+    else quarantined.push(product);
+  }
+
+  const outputPaths = artifactPaths(reportPath, acceptedPath, quarantinePath);
+  const blocked = structuralFindingCount > 0 || accepted.length === 0;
+  const status = blocked ? 'blocked' : quarantined.length ? 'partial' : 'passed';
+  const quarantinedProductNos = [...new Set(quarantined
+    .map(product => productNoFromUrl(product.product_link))
+    .filter(Number.isInteger))];
+
   const report = {
-    status: findings.length ? 'blocked' : 'passed',
+    status,
     links: links.length,
     products: products.length,
+    acceptedProducts: blocked ? 0 : accepted.length,
+    quarantinedProducts: blocked ? products.length : quarantined.length,
+    quarantinedProductNos: blocked ? [] : quarantinedProductNos,
+    acceptedPath: blocked ? null : outputPaths.acceptedPath,
+    quarantinePath: blocked ? null : outputPaths.quarantinePath,
     findings,
   };
+  if (!blocked) {
+    writeJsonLines(outputPaths.acceptedPath, accepted);
+    writeJsonLines(outputPaths.quarantinePath, quarantined);
+  }
   writeReport(reportPath, report);
   return report;
 }

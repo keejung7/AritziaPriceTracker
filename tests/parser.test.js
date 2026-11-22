@@ -110,4 +110,15 @@ describe("db/parser", () => {
       },
     ]);
   });
+
+  test("can parse an explicitly selected admitted artifact", () => {
+    const admittedPath = path.join(
+      __dirname,
+      "fixtures",
+      "product_details_small.jsonl.fixture",
+    );
+    const { getProductDataForInsert } = require("../db/parser");
+
+    expect(getProductDataForInsert(admittedPath)).toHaveLength(1);
+  });
 });

@@ -41,6 +41,8 @@ const detailsPath = path.join(outputDir, `product_details_${runId}.jsonl`);
 const dbLogPath = path.join(outputDir, `db_load_${runId}.log`);
 const validationPath = path.join(outputDir, `validation_${runId}.json`);
 const discoveryPath = path.join(outputDir, `discovery_${runId}.json`);
+const acceptedPath = path.join(outputDir, `accepted_product_details_${runId}.jsonl`);
+const quarantinePath = path.join(outputDir, `quarantine_product_details_${runId}.jsonl`);
 
 const runEnv = {
   PRODUCT_LINKS_PATH: linksPath,
@@ -48,6 +50,8 @@ const runEnv = {
   DB_LOG_PATH: dbLogPath,
   VALIDATION_PATH: validationPath,
   DISCOVERY_PATH: discoveryPath,
+  ACCEPTED_DETAILS_PATH: acceptedPath,
+  QUARANTINE_DETAILS_PATH: quarantinePath,
 };
 
 // Run scripts in sequence

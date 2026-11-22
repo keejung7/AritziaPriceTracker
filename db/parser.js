@@ -1,13 +1,6 @@
 const fs = require("fs");
 const path = require("path");
 
-const filePath =
-  process.env.PRODUCT_DETAILS_PATH ||
-  process.argv[2] ||
-  path.join(__dirname, "..", "product_details.jsonl");
-
-const fileContent = fs.readFileSync(filePath, "utf8");
-
 /**
  * {
   product: {
@@ -63,7 +56,12 @@ const fileContent = fs.readFileSync(filePath, "utf8");
 }
  */
 
-function getProductDataForInsert() {
+function getProductDataForInsert(inputPath) {
+  const filePath = inputPath ||
+    process.env.PRODUCT_DETAILS_PATH ||
+    process.argv[2] ||
+    path.join(__dirname, "..", "product_details.jsonl");
+  const fileContent = fs.readFileSync(filePath, "utf8");
   // read jsonl file, parse JSON object line by line
   const products = fileContent
     .split("\n")
