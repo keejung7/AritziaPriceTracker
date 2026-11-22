@@ -198,6 +198,75 @@ function getCloudinarySizedImageUrl(url, width, height) {
   )}${existingTransforms},${sizeTransforms}${url.slice(transformEnd)}`;
 }
 
+function parsePriceText(value) {
+  if (!value || value === NotAvailable) return null;
+  const match = value.match(/[\d,.]+/);
+  return match ? parseFloat(match[0].replace(/,/g, "")) : null;
+}
+
+async function readColorDetails(page, { url, colorText, swatchImageUrl, hasIndicator }) {
+  const issues = [];
+  let originalPrice = NotAvailable;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    originalPrice = await page.locator('[data-testid="product-list-price-text"]')
+      .innerText({ timeout: SIZE_UI_TIMEOUT_MS }).catch(() => NotAvailable);
+    if (originalPrice !== NotAvailable) break;
+    if (attempt === 1) await delay(RETRY_DELAY_MS);
+  }
+  if (originalPrice === NotAvailable) issues.push('PRICE_MISSING');
+
+  let salePrice = NotAvailable;
+  if (hasIndicator) {
+    const sale = page.locator('p[data-testid="product-list-sale-text"]').first();
+    try {
+      salePrice = (await sale.isVisible()) ? (await sale.innerText()).trim() : null;
+    } catch {
+      salePrice = NotAvailable;
+    }
+  }
+
+  const originalAmount = parsePriceText(originalPrice);
+  const saleAmount = parsePriceText(salePrice);
+  const salePercent = originalAmount && saleAmount
+    ? parseFloat(((originalAmount - saleAmount) / originalAmount).toFixed(2))
+    : null;
+
+  let sizes = [];
+  let sizeOutcome = 'unknown';
+  const dropdown = page.locator(SIZE_DROPDOWN_SELECTOR).filter({ visible: true });
+  if ((await dropdown.count()) > 0) {
+    try {
+      sizes = await extractSizesFromDropdown(page, {
+        uiTimeoutMs: SIZE_UI_TIMEOUT_MS,
+        optionTimeoutMs: SIZE_OPTIONS_TIMEOUT_MS,
+      });
+      sizeOutcome = 'observed';
+    } catch (error) {
+      issues.push('SIZE_EXTRACTION_FAILED');
+      logger.emit('warn', `Skipping size extraction for ${url} - ${error.message}`);
+    }
+  } else {
+    issues.push('SIZE_DROPDOWN_MISSING');
+  }
+
+  const colorId = getColorCodeFromUrl(page.url());
+  const imageUrl = await getProductColorImageUrl(page, colorId);
+  return {
+    colorId,
+    color: {
+      color_text: colorText,
+      swatch_image_url: swatchImageUrl,
+      product_color_image_url: imageUrl,
+      original_price: originalPrice,
+      sale_price: salePrice,
+      sale_percent: salePercent,
+      sizes,
+      size_outcome: sizeOutcome,
+      issues,
+    },
+  };
+}
+
 (async () => {
   // 1. Read the list of unique product URLs from the cleaned CSV
   let productsToScrape;
@@ -372,96 +441,10 @@ function getCloudinarySizedImageUrl(url, width, height) {
               continue;
             }
 
-            // Extract Prices
-            let originalPriceText = NotAvailable;
-            for (let priceAttempt = 1; priceAttempt <= 2; priceAttempt++) {
-              originalPriceText = await page
-                .locator('[data-testid="product-list-price-text"]')
-                .innerText({ timeout: SIZE_UI_TIMEOUT_MS })
-                .catch(() => NotAvailable);
-              if (originalPriceText !== NotAvailable) break;
-              if (priceAttempt === 1) await delay(RETRY_DELAY_MS);
-            }
-
-            let salePriceText = NotAvailable;
-
-            if (hasIndicator) {
-              const salePrice = page
-                .locator('p[data-testid="product-list-sale-text"]')
-                .first();
-
-              try {
-                salePriceText = (await salePrice.isVisible())
-                  ? (await salePrice.innerText()).trim()
-                  : null;
-              } catch {
-                salePriceText = NotAvailable;
-              }
-            }
-
-            // Calculate Sale Percent
-            let salePercent = null;
-            const parsePrice = (str) => {
-              if (!str || str === NotAvailable) return null;
-              const match = str.match(/[\d,.]+/);
-              return match ? parseFloat(match[0].replace(/,/g, "")) : null;
-            };
-
-            const originalPriceVal = parsePrice(originalPriceText);
-            const salePriceVal = parsePrice(salePriceText);
-
-            if (originalPriceVal && salePriceVal) {
-              salePercent = parseFloat(
-                ((originalPriceVal - salePriceVal) / originalPriceVal).toFixed(
-                  2,
-                ),
-              );
-            }
-
-            // Extract sizing and stock availability
-            const sizeDropdown = page
-              .locator(SIZE_DROPDOWN_SELECTOR)
-              .filter({ visible: true });
-            const hasSizeDropdown = (await sizeDropdown.count()) > 0;
-
-            let sizes = [];
-            const colorIssues = [];
-            if (originalPriceText === NotAvailable) colorIssues.push('PRICE_MISSING');
-            let sizeOutcome = 'unknown';
-            if (hasSizeDropdown) {
-              try {
-                sizes = await extractSizesFromDropdown(page, {
-                  uiTimeoutMs: SIZE_UI_TIMEOUT_MS,
-                  optionTimeoutMs: SIZE_OPTIONS_TIMEOUT_MS,
-                });
-                sizeOutcome = 'observed';
-              } catch (sizeError) {
-                colorIssues.push('SIZE_EXTRACTION_FAILED');
-                logger.emit(
-                  "warn",
-                  `Skipping size extraction for ${url} - ${sizeError.message}`,
-                );
-              }
-            } else colorIssues.push('SIZE_DROPDOWN_MISSING');
-
-            const colorCode = getColorCodeFromUrl(page.url());
-            const productColorImageUrl = await getProductColorImageUrl(
-              page,
-              colorCode,
-            );
-            if (colorCode && !colorMap.has(colorCode)) {
-              colorMap.set(colorCode, {
-                color_text: colorText,
-                swatch_image_url: swatchImageUrl,
-                product_color_image_url: productColorImageUrl,
-                original_price: originalPriceText,
-                sale_price: salePriceText,
-                sale_percent: salePercent,
-                sizes,
-                size_outcome: sizeOutcome,
-                issues: colorIssues,
-              });
-            }
+            const { colorId, color } = await readColorDetails(page, {
+              url, colorText, swatchImageUrl, hasIndicator,
+            });
+            if (colorId && !colorMap.has(colorId)) colorMap.set(colorId, color);
           }
         }
 
