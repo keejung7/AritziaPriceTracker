@@ -26,7 +26,7 @@ function buildCatalogQuery(q) {
   const snapshotId = bind(q.cursor?.snapshotId ?? null);
   const variant = q.color !== null || q.sizes.length > 0 || q.minPrice !== null || q.maxPrice !== null || q.saleOnly || q.minDiscount !== null;
   const colorWhere = ['c.snapshot_id=p.snapshot_id','c.product_no=p.product_no'];
-  if (variant) colorWhere.push("c.availability_status='available'",'c.effective_price IS NOT NULL');
+  if (variant) colorWhere.push("c.availability_status='available'",'c.effective_price IS NOT NULL',"c.effective_price <> 'NaN'::numeric");
   else colorWhere.push('c.color_id=p.from_color_id');
   if(q.color!==null) colorWhere.push(`c.color_id=${bind(q.color)}`);
   if(q.sizes.length) colorWhere.push(`c.available_sizes && ${bind(q.sizes)}::text[]`);
@@ -34,7 +34,7 @@ function buildCatalogQuery(q) {
   if(q.maxPrice!==null) colorWhere.push(`c.effective_price<=${bind(q.maxPrice)}`);
   if(q.saleOnly) colorWhere.push('c.sale_price IS NOT NULL AND c.sale_price<c.original_price');
   if(q.minDiscount!==null) colorWhere.push(`c.sale_percent>=${bind(q.minDiscount)}`);
-  const productWhere = ['p.snapshot_id=s.snapshot_id'];
+  const productWhere = ['p.snapshot_id=s.snapshot_id','p.from_price IS NOT NULL',"p.from_price <> 'NaN'::numeric"];
   if(variant) productWhere.push('r.color_id IS NOT NULL');
   if(q.search!==null) {
     const search=bind(q.search);
@@ -62,6 +62,7 @@ function buildCatalogQuery(q) {
     ), option_colors AS (
       SELECT c.color_id AS id,COALESCE(min(NULLIF(trim(c.color_name),'') COLLATE "C"),c.color_id) AS name
       FROM snapshot s JOIN aritzia_products.catalog_product_colors c USING(snapshot_id)
+      WHERE c.availability_status='available' AND c.effective_price IS NOT NULL AND c.effective_price <> 'NaN'::numeric
       GROUP BY c.color_id
     ), eligible AS MATERIALIZED (
       SELECT p.*,r.color_id AS selected_color_id,${sort.expression} AS sort_value,
@@ -80,7 +81,8 @@ function buildCatalogQuery(q) {
       'activated_at',${utc('activated_at')},'stale',stale) FROM snapshot) AS snapshot,
       jsonb_build_object('colors',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.name COLLATE "C",c.id COLLATE "C") FROM option_colors c),'[]'::jsonb),
         'sizes',COALESCE((SELECT jsonb_agg(size ORDER BY size) FROM (SELECT DISTINCT unnest(c.available_sizes) AS size
-          FROM snapshot s JOIN aritzia_products.catalog_product_colors c USING(snapshot_id)) sizes),'[]'::jsonb)) AS filter_options,
+          FROM snapshot s JOIN aritzia_products.catalog_product_colors c USING(snapshot_id)
+          WHERE c.availability_status='available' AND c.effective_price IS NOT NULL AND c.effective_price <> 'NaN'::numeric) sizes),'[]'::jsonb)) AS filter_options,
       (SELECT count(*)::int FROM eligible) AS total,
       (SELECT count(*)>${limit}::int FROM page) AS has_more,
       COALESCE((SELECT jsonb_agg(to_jsonb(items) || jsonb_build_object('product_no',items.product_no::text,
@@ -88,7 +90,8 @@ function buildCatalogQuery(q) {
       FROM (SELECT t.*,${cursorSortValue} AS cursor_sort_value,
         (SELECT COALESCE(jsonb_agg(to_jsonb(c) || jsonb_build_object('product_no',c.product_no::text,
           'snapshot_id',c.snapshot_id::text,'scraped_date',${utc('c.scraped_date')}) ORDER BY c.color_id),'[]'::jsonb)
-         FROM aritzia_products.catalog_product_colors c WHERE c.snapshot_id=t.snapshot_id AND c.product_no=t.product_no) AS colors
+         FROM aritzia_products.catalog_product_colors c WHERE c.snapshot_id=t.snapshot_id AND c.product_no=t.product_no
+           AND c.availability_status='available' AND c.effective_price IS NOT NULL AND c.effective_price <> 'NaN'::numeric) AS colors
         FROM trimmed t) items),'[]'::jsonb) AS products`;
   return {text,values};
 }
