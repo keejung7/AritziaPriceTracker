@@ -28,4 +28,10 @@ describe('raw artifact metadata survives parsing', () => {
     expect(product.colors[0].swatch_image_url).toBeNull();
     expect(product.productColors[0].product_color_image_url).toBeNull();
   });
+  test('parses thousands separators and never emits NaN for malformed prices', () => {
+    const priced = parse([], { original_price: '$1,200', sale_price: '$1,099.50' });
+    expect(priced.priceSnapshots[0]).toMatchObject({ original_price: 1200, sale_price: 1099.5 });
+    const malformed = parse([], { original_price: '$1,2', sale_price: 'N/A' });
+    expect(malformed.priceSnapshots[0]).toMatchObject({ original_price: null, sale_price: null });
+  });
 });
