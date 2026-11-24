@@ -57,15 +57,29 @@ describe('same-color catalog and snapshot pagination',()=>{
     expect((await get('')).items[0].selectedColorId).toBe('red');
     expect(product).not.toHaveProperty('history');
   });
-  test('pages equal discounts without gaps, includes unavailable last and fetches colors only for page',async()=>{
+  test('pages priced available products without gaps and returns only available swatches',async()=>{
     const first=await get('');
     expect(first.items).toHaveLength(24);
     expect(first.items.flatMap(p=>p.colors)).toHaveLength(48);
-    expect(first.total).toBe(30);
+    expect(first.total).toBe(29);
     const second=await get('cursor='+first.nextCursor);
-    expect([...first.items,...second.items].map(p=>p.productNo)).toEqual(Array.from({length:30},(_,i)=>String(i+1)));
+    expect([...first.items,...second.items].map(p=>p.productNo)).toEqual(Array.from({length:29},(_,i)=>String(i+1)));
     expect(second.nextCursor).toBeNull();
-    expect(second.items.at(-1).availabilityStatus).toBe('sold_out');
+    await db.query("UPDATE aritzia_products.catalog_product_colors SET availability_status='sold_out',available_sizes='{}' WHERE snapshot_id=1 AND product_no=1 AND color_id='black'");
+    await db.query("UPDATE aritzia_products.catalog_product_colors SET effective_price=NULL WHERE snapshot_id=1 AND product_no=2 AND color_id='black'");
+    const updated=await get('limit=2');
+    expect(updated.items.map(p=>p.colors.map(c=>c.colorId))).toEqual([['red'],['red']]);
+    expect(updated.filterOptions.colors).toEqual([{id:'black',name:'Black'},{id:'red',name:'Red'}]);
+    expect(updated.filterOptions.sizes).toEqual(['S','M']);
+  });
+  test('omits invalid numeric prices already stored in an active snapshot',async()=>{
+    await db.query("UPDATE aritzia_products.catalog_products SET from_price='NaN'::numeric WHERE snapshot_id=1 AND product_no=1");
+    await db.query("UPDATE aritzia_products.catalog_product_colors SET effective_price='NaN'::numeric WHERE snapshot_id=1 AND product_no=2 AND color_id='black'");
+    const page=await get('limit=2');
+    expect(page.total).toBe(28);
+    expect(page.items.map(p=>p.productNo)).toEqual(['2','3']);
+    expect(page.items[0].colors.map(c=>c.colorId)).toEqual(['red']);
+    expect((await get('color=black')).items.map(p=>p.productNo)).not.toContain('2');
   });
   test('cursor stays on retained snapshot and expires when removed',async()=>{
     const first=await get('limit=2');
@@ -90,9 +104,9 @@ describe('same-color catalog and snapshot pagination',()=>{
       const page=await get(`limit=7&sort=${sort}${cursor?'&cursor='+cursor:''}`);
       ids.push(...page.items.map(p=>p.productNo)); cursor=page.nextCursor;
     } while(cursor);
-    expect(ids).toHaveLength(30); expect(new Set(ids).size).toBe(30); expect(ids.at(-1)).toBe('30');
+    expect(ids).toHaveLength(29); expect(new Set(ids).size).toBe(29); expect(ids).not.toContain('30');
   });
-  test('descending prices paginate differing values and ties before unavailable products',async()=>{
+  test('descending prices paginate differing values and ties',async()=>{
     await db.query(`UPDATE aritzia_products.catalog_product_colors SET effective_price=CASE product_no WHEN 1 THEN 90 WHEN 2 THEN 70 WHEN 3 THEN 70 ELSE 20 END WHERE color_id='red'`);
     const first=await get('limit=2&sort=price-desc');
     expect(first.items.map(p=>p.productNo)).toEqual(['1','2']);
@@ -112,8 +126,8 @@ describe('same-color catalog and snapshot pagination',()=>{
     await db.query(`INSERT INTO aritzia_products.product_colors(product_no,color_id) VALUES($1,'red'),($2,'red')`,[firstId,secondId]);
     await db.query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,effective_price,sale_percent,available_sizes,availability_status,scraped_date)
       VALUES($1,$2,'red',50,50,ARRAY['M'],'available',$4::timestamptz),($1,$3,'red',50,50,ARRAY['M'],'available',$4::timestamptz)`,[snapshot,firstId,secondId,timestamp]);
-    await db.query(`INSERT INTO aritzia_products.catalog_products(snapshot_id,product_no,product_name,from_color_id,availability_status,tracking_started_at)
-      VALUES($1,$2,'First','red','available',$4::timestamptz),($1,$3,'Second','red','available',$4::timestamptz)`,[snapshot,firstId,secondId,timestamp]);
+    await db.query(`INSERT INTO aritzia_products.catalog_products(snapshot_id,product_no,product_name,from_color_id,from_price,availability_status,tracking_started_at)
+      VALUES($1,$2,'First','red',50,'available',$4::timestamptz),($1,$3,'Second','red',50,'available',$4::timestamptz)`,[snapshot,firstId,secondId,timestamp]);
     const first=await get('limit=1&sort=observed-desc');
     expect(first.snapshot).toMatchObject({id:snapshot,dataAsOf:timestamp,refreshedAt:timestamp});
     expect(first.items[0]).toMatchObject({productNo:firstId,trackingStartedAt:timestamp});

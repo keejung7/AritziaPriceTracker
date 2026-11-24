@@ -22,22 +22,22 @@ async function change(page: Page, action: () => Promise<unknown>, key: string, v
 test.beforeEach(async ({ page }, testInfo) => {
   if (testInfo.title.includes('performance budgets')) return;
   await page.goto('/');
-  await expect(page.getByRole('status')).toHaveText('120 products');
+  await expect(page.getByRole('status')).toHaveText('119 products');
   await expect(cards(page)).toHaveCount(24);
 });
 
-test('catalog loads exact labels, default discount order, unique pages, and sold-out last', async ({ page }) => {
+test('catalog loads exact labels, default discount order, unique priced pages', async ({ page }) => {
   await expect(cards(page).first().getByRole('link')).toHaveText('Product 050');
   await expect(cards(page).first()).toContainText('60% off');
   await expect(cards(page).first()).toContainText('Lowest ever');
-  for (let count = 48; count <= 120; count += 24) {
+  for (const count of [48, 72, 96, 119]) {
     await page.getByRole('button', { name: 'Load more', exact: true }).click();
     await expect(cards(page)).toHaveCount(count);
   }
   const hrefs = await cards(page).getByRole('link').evaluateAll(links => links.map(link => link.getAttribute('href')));
-  expect(new Set(hrefs).size).toBe(120);
-  await expect(cards(page).last().getByRole('link')).toHaveText('Product 120');
-  await expect(cards(page).last()).toContainText('Currently unavailable');
+  expect(new Set(hrefs).size).toBe(119);
+  await expect(cards(page).last().getByRole('link')).toHaveText('Product 119');
+  await expect(page.getByText('Price unavailable')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Load more', exact: true })).toHaveCount(0);
 });
 
@@ -93,7 +93,7 @@ test('empty search can clear filters and failed refresh exposes stale snapshot n
   await closeFilters(page);
   await expect(page.getByText('No products match your filters.')).toBeVisible();
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('120 products');
+  await expect(page.getByRole('status')).toHaveText('119 products');
 });
 test('catalog metadata offers named IDs and all observed size families after an empty result', async ({page}) => {
   await openFilters(page,true);
@@ -127,10 +127,10 @@ test('responsive grid, full-width drawer, shared theme and offscreen focus prese
   const theme=await cards(page).first().evaluate(node=>({font:getComputedStyle(node).fontFamily,visibility:getComputedStyle(node).contentVisibility,intrinsic:getComputedStyle(node).containIntrinsicSize}));
   expect(theme.font).toContain('Avenir Next');expect(theme.font).toContain('Helvetica Neue');
   expect(theme.visibility).toBe('auto');expect(theme.intrinsic).toMatch(/auto.*\d+px/);
-  for(let count=48;count<=120;count+=24){await page.getByRole('button',{name:'Load more',exact:true}).click();await expect(cards(page)).toHaveCount(count);}
+  for(const count of [48,72,96,119]){await page.getByRole('button',{name:'Load more',exact:true}).click();await expect(cards(page)).toHaveCount(count);}
   const last=cards(page).last().getByRole('link');await last.focus();await expect(last).toBeFocused();
   const focused=await last.boundingBox();expect(focused!.y).toBeGreaterThanOrEqual(0);expect(focused!.y+focused!.height).toBeLessThanOrEqual(1000);
-  await expect(cards(page).last()).toContainText('Currently unavailable');
+  await expect(cards(page).last()).not.toContainText('Currently unavailable');
   await page.keyboard.press('Tab');await expect(cards(page).last().getByRole('button').first()).toBeFocused();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
 });
