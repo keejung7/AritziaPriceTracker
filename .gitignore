@@ -9,6 +9,7 @@ next-env.d.ts
 *.jsonl
 view.html
 *.log
+data/
 
 # secrets
 .env
