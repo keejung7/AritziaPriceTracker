@@ -6,6 +6,8 @@ Data collection will be performed daily, ensuring changes in price, removal/addi
 
 The project also includes a Next.js app with API routes for reading price history from PostgreSQL.
 
+To report a problem, see [How to open an issue](CONTRIBUTING.md).
+
 ## System Design
 
 ![System design](system_design_simple.png)
@@ -130,6 +132,16 @@ You can also run the full pipeline:
 npm run pipeline
 ```
 
+To refresh one or more products without discovering and scraping the full catalog,
+run `npm run scrape:products -- 136363` or
+`npm run scrape:products -- 136363 134678`. The command looks up IDs in saved
+product-link files; a full `https://www.aritzia.com/en/product/.../<id>.html`
+URL works for a product that is not in those files. It scrapes the selected product
+pages, validates every result, inserts new price and stock observations, and rebuilds
+the catalog. If any requested product fails validation, nothing is loaded. Artifacts
+and the validation report are written under `data/manual/`. This records a new
+observation; it does not rewrite earlier snapshots with invalid prices.
+
 ## Next.js App
 
 Start the local Next.js development server:
@@ -197,7 +209,10 @@ existing image URLs. Older URL-only artifacts remain valid, but category filters
 and product images may be incomplete when loading those artifacts.
 
 `GET /api/catalog/products` returns `{ items, total, nextCursor, snapshot, filterOptions }`.
-Each `items` entry contains one product and all its current colors. There is an
+Each `items` entry contains one product with a known starting price and its currently
+available, priced colors. Sold-out, unknown-stock, and unpriced colors are omitted
+from home-page swatches; products with no available priced color are omitted from the
+home catalog. Historical records remain available on product detail pages. There is an
 exact filtered `total`, `nextCursor` (or null), and `snapshot` with `id`, `dataAsOf`,
 `refreshedAt`, and `status` (`current` or `stale`). Product and snapshot IDs are decimal
 strings, including values above JavaScript's safe integer range. Catalog timestamps
@@ -231,7 +246,7 @@ color**. A black full-price color cannot combine with a red sale color to match
 `From` metadata stays paired with the cheapest available color; a filtered card can
 select a different matching color and show its own price/sizes. Swatches change the
 selected color, not the global `From` price. Default sorting ranks discount descending,
-ties by product number, with unavailable products last. Product histories load only on
+ties by product number. Product histories load only on
 the detail page, where Highcharts is lazy loaded.
 
 Cursor pages stay on their retained snapshot even if a new one activates. Once cleanup
