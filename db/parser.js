@@ -191,9 +191,10 @@ function parseAritziaUrl(productLink) {
 function parsePrice(price) {
   if (!price || price == "N/A") return null;
 
-  const parsed = price.replace("$", "").trim();
-
-  return Number(parsed);
+  const formatted = String(price).trim();
+  if (!/^\$?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(formatted)) return null;
+  const parsed = Number(formatted.replace(/[$,]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function getSourceCategories(sourceCategories) {
