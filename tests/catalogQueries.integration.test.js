@@ -13,8 +13,8 @@ describe('same-color catalog and snapshot pagination',()=>{
     await db.query(`INSERT INTO aritzia_products.products(product_no,product_slug,product_full_url,product_name) SELECT n,n::text,'https://example.com/'||n,'Product '||n FROM generate_series(1,30) n`);
     await db.query(`INSERT INTO aritzia_products.colors(color_id,color_name) VALUES('black','Black'),('red','Red')`);
     await db.query(`INSERT INTO aritzia_products.product_colors(product_no,color_id) SELECT n,c FROM generate_series(1,30) n CROSS JOIN unnest(ARRAY['black','red']) c`);
-    await db.query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,original_price,sale_price,effective_price,sale_percent,available_sizes,availability_status,scraped_date)
-      SELECT 1,n,c,100,CASE WHEN c='red' THEN 50 END,CASE WHEN c='red' THEN 50 ELSE 80 END,CASE WHEN c='red' THEN 50 ELSE 0 END,
+    await db.query(`INSERT INTO aritzia_products.catalog_product_colors(snapshot_id,product_no,color_id,color_name,original_price,sale_price,effective_price,sale_percent,available_sizes,availability_status,scraped_date)
+      SELECT 1,n,c,initcap(c),100,CASE WHEN c='red' THEN 50 END,CASE WHEN c='red' THEN 50 ELSE 80 END,CASE WHEN c='red' THEN 50 ELSE 0 END,
       CASE WHEN c='red' THEN ARRAY['M'] ELSE ARRAY['S'] END,CASE WHEN n=30 THEN 'sold_out' ELSE 'available' END,now()
       FROM generate_series(1,30) n CROSS JOIN unnest(ARRAY['black','red']) c`);
     await db.query(`INSERT INTO aritzia_products.catalog_products(snapshot_id,product_no,product_name,product_brand,categories,from_color_id,from_price,from_original_price,from_sale_percent,availability_status)
