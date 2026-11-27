@@ -1,0 +1,79 @@
+name: "CI: build and test"
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CATALOG_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/catalog_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: catalog_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d catalog_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - id: jest
+        run: npm test -- --json --outputFile="$RUNNER_TEMP/jest-results.json"
+      - name: Run database integration tests
+        id: db
+        run: npm run test:db -- --json --outputFile="$RUNNER_TEMP/db-results.json"
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - id: playwright
+        run: npm run test:e2e
+
+      - name: Summarize test results
+        if: always()
+        env:
+          JEST_OUTCOME: ${{ steps.jest.outcome }}
+          DB_OUTCOME: ${{ steps.db.outcome }}
+          PLAYWRIGHT_OUTCOME: ${{ steps.playwright.outcome }}
+        run: |
+          node <<'NODE'
+          const { appendFileSync, existsSync, readFileSync } = require('node:fs');
+          const { join } = require('node:path');
+
+          function readReport(path) {
+            return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null;
+          }
+
+          const jest = readReport(join(process.env.RUNNER_TEMP, 'jest-results.json'));
+          const db = readReport(join(process.env.RUNNER_TEMP, 'db-results.json'));
+          const playwright = readReport('test-results/catalog-results.json')?.stats;
+          const rows = [
+            ['Suite', 'Status', 'Passed', 'Skipped', 'Failed', 'Flaky', 'Todo'],
+            ['---', '---', '---:', '---:', '---:', '---:', '---:'],
+            ['Jest', process.env.JEST_OUTCOME,
+              jest?.numPassedTests, jest?.numPendingTests, jest?.numFailedTests, undefined, jest?.numTodoTests],
+            ['DB integration', process.env.DB_OUTCOME,
+              db?.numPassedTests, db?.numPendingTests, db?.numFailedTests, undefined, db?.numTodoTests],
+            ['Playwright', process.env.PLAYWRIGHT_OUTCOME,
+              playwright?.expected, playwright?.skipped, playwright?.unexpected, playwright?.flaky, undefined],
+          ];
+          const table = rows.map(row => '| ' + row.map(value => value ?? '—').join(' | ') + ' |').join('\n');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Test results\n\n' + table + '\n');
+          NODE
