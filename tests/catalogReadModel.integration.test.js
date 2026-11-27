@@ -1,5 +1,7 @@
 /** @jest-environment node */
 const fs = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { Pool } = require('pg');
 const { refreshCatalogReadModel } = require('../db/catalogReadModel');
@@ -13,7 +15,7 @@ describe('atomic catalog derivation in an isolated schema', () => {
     pool = new Pool({ connectionString: validateTestDatabaseUrl(connectionString) });
     client = await pool.connect();
     schema = `catalog_test_${randomBytes(8).toString('hex')}`;
-    logPath = `/private/tmp/${schema}.log`;
+    logPath = join(tmpdir(), `${schema}.log`);
     const raw = fs.readFileSync(require.resolve('./fixtures/originalRawSchema.sql'), 'utf8');
     const migration = fs.readFileSync(require.resolve('../db/migrations/009_add_catalog_read_model.sql'), 'utf8');
     await client.query(raw.replaceAll('aritzia_products', schema));
