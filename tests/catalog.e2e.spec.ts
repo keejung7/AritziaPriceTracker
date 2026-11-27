@@ -36,7 +36,7 @@ test('catalog loads exact labels, default discount order, unique priced pages', 
   }
   const hrefs = await cards(page).getByRole('link').evaluateAll(links => links.map(link => link.getAttribute('href')));
   expect(new Set(hrefs).size).toBe(119);
-  await expect(cards(page).last().getByRole('link')).toHaveText('Product 119');
+  await expect(cards(page).last().getByRole('link')).toHaveText('Product 099');
   await expect(page.getByText('Price unavailable')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Load more', exact: true })).toHaveCount(0);
 });
@@ -211,10 +211,11 @@ test('production catalog and lazy charts meet local performance budgets', async 
   await page.getByRole('button', { name: 'Reset filters', exact: true }).click();
   await closeFilters(page);
   await expect(cards(page)).toHaveCount(24);
-  for (let count = 48; count <= 120; count += 24) {
+  for (const count of [48, 72, 96, 119]) {
     await page.getByRole('button', { name: 'Load more', exact: true }).click();
     await expect(cards(page)).toHaveCount(count);
   }
+  const loadedCards = await cards(page).count();
   const scroll = await page.evaluate(async () => {
     const frames: number[] = []; let previous = performance.now();
     for (let i = 0; i < 60; i++) await new Promise<void>(resolve => requestAnimationFrame(now => { frames.push(now - previous); previous = now; window.scrollBy(0, 120); resolve(); }));
@@ -225,12 +226,15 @@ test('production catalog and lazy charts meet local performance budgets', async 
   const vitals = await page.evaluate(() => (window as any).__catalogMetrics);
   const detailStart = performance.now();
   await page.goto('/products/1');
-  await expect(page.locator('.highcharts-container')).toHaveCount(2);
+  const priceChart = page.getByRole('region', { name: 'Price history chart', exact: true });
+  await expect(priceChart.locator('.highcharts-container')).toBeVisible();
+  const availability = page.getByRole('region', { name: 'Size availability history', exact: true });
+  await expect(availability.getByRole('group', { name: 'Stock by size and observation date' })).toBeVisible();
   const detailChartMs = performance.now() - detailStart;
   const detailResources = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => (e as PerformanceResourceTiming).initiatorType === 'script').map(e => ({ name: e.name, encoded: (e as PerformanceResourceTiming).encodedBodySize })));
   const initialNames = new Set(initialResources.map(r => r.name));
   const chartJsBytes = detailResources.filter(r => !initialNames.has(r.name)).reduce((sum, r) => sum + r.encoded, 0);
-  const evidence = { viewport: testInfo.project.name, initialRenderMs, catalogJsEncodedBytes: initialResources.reduce((sum, r) => sum + r.encoded, 0), catalogJsTransferBytes: initialResources.reduce((sum, r) => sum + r.transfer, 0), catalogLoadsHighcharts, filterLatencyMs, scrollP95FrameMs: scroll, cards: 120, domNodes: dom.nodes, heapGrowthBytes: finalHeap - initialHeap, initialHeap, finalHeap, ...vitals, detailChartMs, chartJsBytes, initialResources, detailResources };
+  const evidence = { viewport: testInfo.project.name, initialRenderMs, catalogJsEncodedBytes: initialResources.reduce((sum, r) => sum + r.encoded, 0), catalogJsTransferBytes: initialResources.reduce((sum, r) => sum + r.transfer, 0), catalogLoadsHighcharts, filterLatencyMs, scrollP95FrameMs: scroll, cards: loadedCards, domNodes: dom.nodes, heapGrowthBytes: finalHeap - initialHeap, initialHeap, finalHeap, ...vitals, detailChartMs, chartJsBytes, initialResources, detailResources };
   await testInfo.attach('performance-evidence', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
   expect(evidence.catalogJsEncodedBytes).toBeLessThan(650000);
   expect(catalogLoadsHighcharts).toBe(false);
