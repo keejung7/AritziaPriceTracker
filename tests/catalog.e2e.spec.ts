@@ -143,14 +143,15 @@ test('chart areas keep reserved height during lazy loading and insufficient hist
     await route.continue();
   });
   await page.goto('/products/1');
-  const price=page.getByRole('region',{name:'Price history chart',exact:true}), availability=page.getByRole('region',{name:'Availability history chart',exact:true});
+  const price=page.getByRole('region',{name:'Price history chart',exact:true}), availability=page.getByRole('region',{name:'Size availability history',exact:true});
   await expect(page.getByText('Loading chart…').first()).toBeVisible();
-  expect((await price.boundingBox())!.height).toBeGreaterThanOrEqual(340);
-  expect((await availability.boundingBox())!.height).toBeGreaterThanOrEqual(260);
+  expect((await price.boundingBox())!.height).toBeGreaterThanOrEqual(195);
+  await expect(availability.getByRole('group', { name: 'Stock by size and observation date' })).toBeVisible();
   release();await expect(price.locator('.highcharts-container')).toBeVisible();
   const chartFont=await price.locator('svg').first().evaluate(node=>getComputedStyle(node).fontFamily);
   expect(chartFont).toContain('Avenir Next');
-  await expect(price.locator('.highcharts-xaxis .highcharts-axis-line')).toHaveAttribute('stroke','#DDD5CB');
+  await expect(price.locator('.highcharts-xaxis-labels text')).toHaveCount(0);
+  await expect(availability.getByLabel('Observation date (UTC)')).toBeVisible();
   await page.unroute('**/_next/static/chunks/*.js');
   await page.route('**/api/products/1/price-history',async route=>{
     const response=await route.fetch();const body=await response.json();
@@ -160,8 +161,8 @@ test('chart areas keep reserved height during lazy loading and insufficient hist
   });
   await page.reload();
   await expect(page.getByText('Price history is still building',{exact:true})).toBeVisible();
-  expect((await price.boundingBox())!.height).toBeGreaterThanOrEqual(340);
-  expect((await availability.boundingBox())!.height).toBeGreaterThanOrEqual(260);
+  expect((await price.boundingBox())!.height).toBeGreaterThanOrEqual(195);
+  await expect(availability.getByRole('group', { name: 'Stock by size and observation date' })).toBeVisible();
 });
 
 test('detail loads selected-color Highcharts and product-wide lowest-available mode', async ({ page }) => {
@@ -179,7 +180,7 @@ test('detail loads selected-color Highcharts and product-wide lowest-available m
   await expect(page.getByRole('button', { name: 'Product lowest available', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#price-method')).toContainText('Daily lowest price among colors with an available size');
   await expect(chart.locator('[aria-label*="Red"]').first()).toHaveAttribute('aria-label', /Red.*\$4[1-3]\.00/);
-  await expect(page.getByRole('region', { name: 'Availability history chart', exact: true }).locator('.highcharts-container')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Size availability history', exact: true }).getByRole('group', { name: 'Stock by size and observation date' })).toBeVisible();
   await expect(page.getByText('Highest price ever', { exact: true })).toHaveCount(0);
 });
 
